@@ -3,11 +3,11 @@ import mongoose from 'mongoose';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { validationResult } from 'express-validator';
 import User from '../models/User';
 import RefreshToken from '../models/RefreshToken';
 import PasswordReset from '../models/PasswordReset';
 import { registerValidation, loginValidation, forgotPasswordValidation, resetPasswordValidation } from '../middleware/validation';
+import { validate } from '../middleware/validation';
 
 const router = express.Router();
 
@@ -17,10 +17,7 @@ const generateTokens = (userId: string) => {
   return { token, refreshToken };
 };
 
-router.post('/register', registerValidation, async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+router.post('/register', registerValidation, validate, async (req: Request, res: Response) => {
   try {
     const { username, email, password } = req.body;
     const normalizedEmail = email.toLowerCase().trim();
@@ -42,10 +39,7 @@ router.post('/register', registerValidation, async (req: Request, res: Response)
   }
 });
 
-router.post('/login', loginValidation, async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+router.post('/login', loginValidation, validate, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
     const normalizedEmail = email.toLowerCase().trim();
@@ -65,10 +59,7 @@ router.post('/login', loginValidation, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/forgot-password', forgotPasswordValidation, async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+router.post('/forgot-password', forgotPasswordValidation, validate, async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     const normalizedEmail = email.toLowerCase().trim();
@@ -83,16 +74,13 @@ router.post('/forgot-password', forgotPasswordValidation, async (req: Request, r
     const hashedToken = await bcrypt.hash(resetToken, 10);
     await PasswordReset.create({ userId: user._id, token: hashedToken });
 
-    res.json({ message: 'If an account with that email exists, a reset token has been generated', resetToken, userId: user.id });
+    res.json({ message: 'If an account with that email exists, a reset token has been generated' });
   } catch (error: any) {
     res.status(500).json({ message: 'Failed to process reset request' });
   }
 });
 
-router.post('/reset-password', resetPasswordValidation, async (req: Request, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+router.post('/reset-password', resetPasswordValidation, validate, async (req: Request, res: Response) => {
   try {
     const { token, userId, newPassword } = req.body;
     const resetRecord = await PasswordReset.findOne({ userId: new mongoose.Types.ObjectId(userId) });

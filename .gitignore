@@ -2,4 +2,10 @@ node_modules/
 dist/
 uploads/
 .env
+.env.local
+.env.production
 *.log
+.idea/
+.vscode/
+*.swp
+*.swo

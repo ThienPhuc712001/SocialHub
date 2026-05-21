@@ -490,6 +490,7 @@ function App() {
                   <Route path="/" element={<FeedPage showCreateModal={showCreateModal} onCloseCreateModal={() => setShowCreateModal(false)} />} />
                   <Route path="/reels" element={<ReelsPage />} />
                   <Route path="/live" element={<LivePage />} />
+                  <Route path="/live/:streamId" element={<LivePage />} />
                   <Route path="/analytics" element={<AnalyticsPage />} />
                   <Route path="/explore" element={<ExplorePage />} />
                   <Route path="/messages" element={<MessagesPage />} />

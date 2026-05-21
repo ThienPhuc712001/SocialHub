@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: social-server
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./server/.env
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: social-client
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:6
+    container_name: social-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo-data:

@@ -44,6 +44,29 @@ router.get('/suggestions', authMiddleware, async (req: AuthRequest, res: Respons
   }
 });
 
+router.get('/reels', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+    const skip = (page - 1) * limit;
+
+    const blocks = await Block.find({ blocker: new mongoose.Types.ObjectId(req.user!.id) });
+    const blockedIds = blocks.map(b => b.blocked);
+
+    const filter: any = { image: { $exists: true, $ne: null }, author: { $nin: blockedIds }, visibility: 'public' };
+    const total = await Post.countDocuments(filter);
+    const posts = await Post.find(filter)
+      .populate('author', 'username avatar isVerified')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({ posts, total, page, pages: Math.ceil(total / limit) });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 router.get('/hashtags/:tag', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const tag = (req.params.tag as string).toLowerCase();
@@ -67,9 +90,10 @@ router.get('/hashtags/:tag', authMiddleware, async (req: AuthRequest, res: Respo
   }
 });
 
-router.get('/search/:query', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.get('/search', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const queryStr = req.params.query as string;
+    const queryStr = (req.query.q as string) || '';
+    if (!queryStr.trim()) return res.json({ posts: [], total: 0, page: 1, pages: 0 });
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
@@ -387,11 +411,6 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
     const post = await Post.findById(postId);
     if (!post || post.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Post not found' });
     await Post.deleteOne({ _id: post._id });
-    const commentCount = await Comment.countDocuments({ post: post._id });
-    await mongoose.model('Post').updateOne(
-      { _id: post._id },
-      { $inc: { commentCount: -commentCount } }
-    );
     await Comment.deleteMany({ post: post._id });
     await Bookmark.deleteMany({ post: post._id });
 
@@ -506,8 +525,10 @@ router.delete('/:id/comments/:commentId', authMiddleware, async (req: AuthReques
     if (!mongoose.Types.ObjectId.isValid(commentId)) return res.status(400).json({ message: 'Invalid comment ID' });
     const comment = await Comment.findById(commentId);
     if (!comment || comment.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Comment not found' });
+    const replyCount = await Comment.countDocuments({ parentComment: comment._id });
     await Comment.deleteMany({ parentComment: comment._id });
     await comment.deleteOne();
+    await Post.updateOne({ _id: comment.post }, { $inc: { commentCount: -(1 + replyCount) } });
     res.json({ message: 'Comment deleted' });
   } catch (error: any) {
     res.status(500).json({ message: 'Internal server error' });

@@ -52,6 +52,7 @@ const AnalyticsPage: React.FC = () => {
   const { addToast } = useToast()
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'all'>('30d')
 
   useEffect(() => {
@@ -61,48 +62,12 @@ const AnalyticsPage: React.FC = () => {
   const fetchAnalytics = async () => {
     try {
       setLoading(true)
+      setError(null)
       const response = await profiles.getAnalytics(timeRange)
       setAnalytics(response.data)
-    } catch (error) {
-      // Mock data for demonstration
-      setAnalytics({
-        totalPosts: 42,
-        totalLikes: 1289,
-        totalComments: 367,
-        totalViews: 5421,
-        followersCount: 284,
-        followingCount: 156,
-        engagementRate: 8.7,
-        topPosts: [
-          {
-            _id: '1',
-            content: 'Beautiful sunset at the beach 🌅',
-            likes: 89,
-            comments: 23,
-            views: 456,
-            createdAt: new Date(Date.now() - 86400000).toISOString()
-          },
-          {
-            _id: '2',
-            content: 'My new recipe is ready! 🍝',
-            likes: 67,
-            comments: 18,
-            views: 389,
-            createdAt: new Date(Date.now() - 172800000).toISOString()
-          }
-        ],
-        monthlyStats: [
-          { month: 'Jan', posts: 8, likes: 245, comments: 67 },
-          { month: 'Feb', posts: 12, likes: 312, comments: 89 },
-          { month: 'Mar', posts: 15, likes: 378, comments: 102 },
-          { month: 'Apr', posts: 7, likes: 354, comments: 109 }
-        ],
-        recentActivity: [
-          { type: 'like', description: 'Someone liked your post', timestamp: new Date(Date.now() - 3600000).toISOString() },
-          { type: 'comment', description: 'New comment on your photo', timestamp: new Date(Date.now() - 7200000).toISOString() },
-          { type: 'follow', description: 'New follower: @johndoe', timestamp: new Date(Date.now() - 10800000).toISOString() }
-        ]
-      })
+    } catch {
+      setAnalytics(null)
+      setError('Failed to load analytics data. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -159,7 +124,20 @@ const AnalyticsPage: React.FC = () => {
     )
   }
 
-  if (!analytics) return null
+  if (!analytics) return (
+    <div className="flex flex-col items-center justify-center py-12 glass-card rounded-2xl">
+      <BarChart3 size={48} className="text-text-muted mb-4" />
+      <p className="text-text-muted text-lg mb-4">{error || 'No analytics data available'}</p>
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={fetchAnalytics}
+        className="px-6 py-2 bg-gradient-to-r from-primary to-accent text-white rounded-xl font-medium shadow-glow-sm"
+      >
+        Retry
+      </motion.button>
+    </div>
+  )
 
   return (
     <>

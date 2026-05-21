@@ -79,18 +79,14 @@ const ExplorePage: React.FC = () => {
 
     const fetchRecommendations = async () => {
       try {
-        // Simulate algorithmic recommendations based on user interests
-        const res = await posts.getTimeline(1, 6) // Get recent posts as recommendations
+        const res = await posts.getTimeline(1, 6)
         setRecommendedPosts(res.data.posts?.slice(0, 6) || [])
 
-        // Simulate trending topics with trend indicators
-        setTrendingTopics([
-          { topic: 'Technology', posts: 1250, trend: 'up' },
-          { topic: 'Photography', posts: 890, trend: 'up' },
-          { topic: 'Travel', posts: 654, trend: 'stable' },
-          { topic: 'Food', posts: 432, trend: 'down' },
-          { topic: 'Fitness', posts: 321, trend: 'up' }
-        ])
+        setTrendingTopics(trendingHashtags.map(({ tag, count }) => ({
+          topic: tag,
+          posts: count,
+          trend: 'up' as const,
+        })))
       } catch {
         setRecommendedPosts([])
         setTrendingTopics([])

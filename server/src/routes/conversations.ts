@@ -14,22 +14,31 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
       .populate('creator', 'username avatar')
       .sort({ lastMessageTime: -1 });
 
-    const result = await Promise.all(conversations.map(async (conv) => {
-      const unreadCount = await Message.countDocuments({
-        conversationId: conv._id,
-        sender: { $ne: userId },
-        read: false,
-      });
+    const convIds = conversations.map(c => c._id);
 
-      const lastMsg = await Message.findOne({ conversationId: conv._id })
-        .sort({ createdAt: -1 })
-        .populate('sender', 'username avatar');
+    const unreadAgg = await Message.aggregate([
+      { $match: { conversationId: { $in: convIds }, sender: { $ne: userId }, read: false } },
+      { $group: { _id: '$conversationId', count: { $sum: 1 } } },
+    ]);
+    const unreadMap = new Map(unreadAgg.map(a => [a._id.toString(), a.count]));
 
-      return {
-        ...conv.toObject(),
-        lastMessage: lastMsg ? { content: lastMsg.content, sender: lastMsg.sender, createdAt: lastMsg.createdAt } : null,
-        unreadCount,
-      };
+    const lastMsgDocs = await Message.find({ conversationId: { $in: convIds } })
+      .populate('sender', 'username avatar')
+      .sort({ createdAt: -1 })
+      .limit(convIds.length);
+
+    const lastMsgMap = new Map<string, any>();
+    for (const msg of lastMsgDocs) {
+      const key = msg.conversationId!.toString();
+      if (!lastMsgMap.has(key)) lastMsgMap.set(key, msg);
+    }
+
+    const result = conversations.map(conv => ({
+      ...conv.toObject(),
+      lastMessage: lastMsgMap.has(conv._id.toString())
+        ? { content: lastMsgMap.get(conv._id.toString())!.content, sender: lastMsgMap.get(conv._id.toString())!.sender, createdAt: lastMsgMap.get(conv._id.toString())!.createdAt }
+        : null,
+      unreadCount: unreadMap.get(conv._id.toString()) || 0,
     }));
 
     res.json(result);

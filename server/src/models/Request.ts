@@ -14,4 +14,7 @@ const requestSchema = new Schema<IRequest>({
   createdAt: { type: Date, default: Date.now },
 });
 
+requestSchema.index({ to: 1, status: 1 });
+requestSchema.index({ from: 1, status: 1 });
+
 export default mongoose.model<IRequest>('Request', requestSchema);

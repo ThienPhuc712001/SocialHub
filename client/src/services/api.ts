@@ -308,13 +308,15 @@ export const posts = {
   getBookmarks: (page = 1, limit = 10) =>
     api.get<PaginatedResponse<Post>>('/posts/bookmarks', { params: { page, limit } }),
   search: (query: string, page = 1, limit = 10) =>
-    api.get<PaginatedResponse<Post>>(`/posts/search/${query}`, { params: { page, limit } }),
+    api.get<PaginatedResponse<Post>>('/posts/search', { params: { q: query, page, limit } }),
   getByHashtag: (tag: string, page = 1, limit = 10) =>
     api.get<PaginatedResponse<Post>>(`/posts/hashtags/${tag}`, { params: { page, limit } }),
   pin: (id: string) => api.post(`/posts/${id}/pin`),
   unpin: (id: string) => api.delete(`/posts/${id}/pin`),
   shareToChat: (id: string, targetUserId: string) =>
     api.post(`/posts/${id}/share-to-chat`, { targetUserId }),
+  getReels: (page = 1, limit = 10) =>
+    api.get<PaginatedResponse<Post>>('/posts/reels', { params: { page, limit } }),
 };
 
 export const profiles = {
@@ -330,7 +332,7 @@ export const profiles = {
   getBlocked: () => api.get<User[]>('/profile/blocked'),
   getBlockStatus: (id: string) => api.get<{ isBlocked: boolean; blockedByMe: boolean }>(`/profile/block-status/${id}`),
   search: (query: string, page = 1, limit = 10) =>
-    api.get<PaginatedResponse<User>>(`/profile/search/${query}`, { params: { page, limit } }),
+    api.get<PaginatedResponse<User>>('/profile/search', { params: { q: query, page, limit } }),
   getRequests: () => api.get<FriendRequest[]>('/profile/requests'),
   getRequestCount: () => api.get<{ count: number }>('/profile/requests/count'),
   acceptRequest: (id: string) => api.post(`/profile/accept/${id}`),
@@ -464,6 +466,40 @@ export const adminService = {
 export const reportService = {
   create: (targetId: string, targetType: 'post' | 'comment' | 'user' | 'story', reason: string) =>
     api.post<{ message: string }>('/reports', { targetId, targetType, reason }),
+};
+
+export interface LiveStreamType {
+  _id: string;
+  title: string;
+  host: {
+    _id: string;
+    username: string;
+    avatar?: string;
+    isVerified?: boolean;
+  };
+  status: 'live' | 'ended';
+  viewerCount: number;
+  peakViewerCount: number;
+  likeCount: number;
+  thumbnail?: string;
+  startedAt: string;
+  endedAt?: string;
+  duration?: number;
+  createdAt: string;
+}
+
+export const livestreamService = {
+  create: (title: string, thumbnail?: File) => {
+    const formData = new FormData();
+    formData.append('title', title);
+    if (thumbnail) formData.append('thumbnail', thumbnail);
+    return api.post<LiveStreamType>('/livestreams', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  getActive: () => api.get<LiveStreamType[]>('/livestreams/active'),
+  get: (id: string) => api.get<LiveStreamType>(`/livestreams/${id}`),
+  end: (id: string) => api.put<LiveStreamType>(`/livestreams/${id}/end`),
+  like: (id: string) => api.put<{ likeCount: number }>(`/livestreams/${id}/like`),
+  getHistory: () => api.get<LiveStreamType[]>('/livestreams/history'),
 };
 
 export default api;

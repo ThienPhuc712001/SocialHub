@@ -13,8 +13,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/morgan": "^1.9.10",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -26,16 +24,18 @@
     "mongoose": "^5.13.22",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
-    "socket.io": "^4.8.3",
-    "typescript": "^4.9.5"
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/morgan": "^1.9.10",
     "@types/multer": "^2.1.0",
     "@types/node": "^25.7.0",
     "nodemon": "^3.1.14",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^4.9.5"
   }
 }

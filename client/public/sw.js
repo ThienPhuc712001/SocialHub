@@ -12,7 +12,7 @@ const urlsToCache = [
 ]
 
 // Install event - cache resources
-self.addEventListener('install', (event: any) => {
+self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
@@ -25,7 +25,7 @@ self.addEventListener('install', (event: any) => {
 })
 
 // Activate event - clean up old caches
-self.addEventListener('activate', (event: any) => {
+self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
@@ -43,7 +43,7 @@ self.addEventListener('activate', (event: any) => {
 })
 
 // Fetch event - serve from cache when offline
-self.addEventListener('fetch', (event: any) => {
+self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
@@ -54,7 +54,7 @@ self.addEventListener('fetch', (event: any) => {
 })
 
 // Push event - handle incoming push notifications
-self.addEventListener('push', (event: any) => {
+self.addEventListener('push', (event) => {
   console.log('Push received:', event)
 
   if (!event.data) {
@@ -84,7 +84,7 @@ self.addEventListener('push', (event: any) => {
 })
 
 // Notification click event - handle when user clicks on notification
-self.addEventListener('notificationclick', (event: any) => {
+self.addEventListener('notificationclick', (event) => {
   console.log('Notification click:', event)
 
   event.notification.close()
@@ -133,7 +133,7 @@ self.addEventListener('notificationclick', (event: any) => {
 })
 
 // Background sync for offline actions
-self.addEventListener('sync', (event: any) => {
+self.addEventListener('sync', (event) => {
   console.log('Background sync:', event)
 
   if (event.tag === 'background-sync-posts') {

@@ -305,12 +305,10 @@ router.post('/unfollow/:id', authMiddleware, followValidation, async (req: AuthR
   }
 });
 
-router.get('/search/:query', authMiddleware, searchValidation, async (req: AuthRequest, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+router.get('/search', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const queryStr = req.params.query as string;
+    const queryStr = (req.query.q as string) || '';
+    if (!queryStr.trim()) return res.json({ users: [], total: 0, page: 1, pages: 0 });
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
@@ -380,6 +378,186 @@ router.post('/decline/:id', authMiddleware, async (req: AuthRequest, res: Respon
     res.json({ message: 'Declined' });
   } catch {
     res.status(500).json({ message: 'Failed to decline request' });
+  }
+});
+
+router.get('/close-friends', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await User.findById(req.user!.id).populate('closeFriends', 'username avatar bio');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json(user.closeFriends);
+  } catch {
+    res.status(500).json({ message: 'Failed to fetch close friends' });
+  }
+});
+
+router.post('/close-friends/:id', authMiddleware, followValidation, async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  try {
+    const targetId = req.params.id as string;
+    if (targetId === req.user!.id) return res.status(400).json({ message: 'Cannot add yourself as close friend' });
+    const user = await User.findById(req.user!.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const oid = new mongoose.Types.ObjectId(targetId);
+    if (user.closeFriends.some(id => id.equals(oid))) return res.status(400).json({ message: 'Already a close friend' });
+    user.closeFriends.push(oid);
+    await user.save();
+    res.json({ message: 'Added to close friends' });
+  } catch {
+    res.status(500).json({ message: 'Failed to add close friend' });
+  }
+});
+
+router.delete('/close-friends/:id', authMiddleware, followValidation, async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  try {
+    const targetId = req.params.id as string;
+    const user = await User.findById(req.user!.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const oid = new mongoose.Types.ObjectId(targetId);
+    user.closeFriends = user.closeFriends.filter(id => !id.equals(oid));
+    await user.save();
+    res.json({ message: 'Removed from close friends' });
+  } catch {
+    res.status(500).json({ message: 'Failed to remove close friend' });
+  }
+});
+
+router.put('/privacy-settings', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await User.findById(req.user!.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const settings = req.body;
+    if (settings.postsVisibility) user.privacySettings.postsVisibility = settings.postsVisibility;
+    if (settings.messagesFrom) user.privacySettings.messagesFrom = settings.messagesFrom;
+    if (settings.storiesVisibility) user.privacySettings.storiesVisibility = settings.storiesVisibility;
+    if (settings.profileVisibility) user.privacySettings.profileVisibility = settings.profileVisibility;
+    if (typeof settings.activityStatus === 'boolean') user.privacySettings.activityStatus = settings.activityStatus;
+    if (typeof settings.dataSharing === 'boolean') user.privacySettings.dataSharing = settings.dataSharing;
+    await user.save();
+    res.json(user);
+  } catch {
+    res.status(500).json({ message: 'Failed to update privacy settings' });
+  }
+});
+
+router.put('/monetization-settings', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await User.findById(req.user!.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const settings = req.body;
+    if (typeof settings.allowAds === 'boolean') user.monetizationSettings.allowAds = settings.allowAds;
+    if (typeof settings.creatorSubscriptions === 'boolean') user.monetizationSettings.creatorSubscriptions = settings.creatorSubscriptions;
+    if (typeof settings.subscriptionPrice === 'number') user.monetizationSettings.subscriptionPrice = settings.subscriptionPrice;
+    if (settings.adsFrequency) user.monetizationSettings.adsFrequency = settings.adsFrequency;
+    await user.save();
+    res.json(user);
+  } catch {
+    res.status(500).json({ message: 'Failed to update monetization settings' });
+  }
+});
+
+router.get('/analytics', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user!.id);
+    const timeRange = (req.query.timeRange as string) || '30d';
+
+    const now = new Date();
+    let startDate: Date;
+    switch (timeRange) {
+      case '7d': startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); break;
+      case '90d': startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000); break;
+      case 'all': startDate = new Date(0); break;
+      default: startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); break;
+    }
+
+    const totalPosts = await Post.countDocuments({ author: userId, createdAt: { $gte: startDate } });
+    const userPosts = await Post.find({ author: userId, createdAt: { $gte: startDate } }).select('likes commentCount viewCount createdAt');
+    const totalLikes = userPosts.reduce((sum, p) => sum + p.likes.length, 0);
+    const totalComments = userPosts.reduce((sum, p) => sum + p.commentCount, 0);
+    const totalViews = userPosts.reduce((sum, p) => sum + (p.viewCount || 0), 0);
+
+    const allTimePosts = await Post.countDocuments({ author: userId });
+    const allTimeLikes = (await Post.find({ author: userId }).select('likes')).reduce((sum, p) => sum + p.likes.length, 0);
+
+    const user = await User.findById(userId);
+    const followersCount = user?.followers.length || 0;
+    const followingCount = user?.following.length || 0;
+    const engagementRate = totalPosts > 0 && followersCount > 0
+      ? ((totalLikes + totalComments) / followersCount / totalPosts) * 100
+      : 0;
+
+    const topPosts = await Post.find({ author: userId })
+      .select('content likes commentCount viewCount createdAt')
+      .sort({ viewCount: -1 })
+      .limit(5);
+
+    const topPostsFormatted = topPosts.map(p => ({
+      _id: p._id,
+      content: p.content,
+      likes: p.likes.length,
+      comments: p.commentCount,
+      views: p.viewCount || 0,
+      createdAt: p.createdAt,
+    }));
+
+    const monthlyStats = await Post.aggregate([
+      { $match: { author: userId, createdAt: { $gte: startDate } } },
+      { $group: {
+        _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
+        posts: { $sum: 1 },
+        likes: { $sum: { $size: '$likes' } },
+        comments: { $sum: '$commentCount' },
+      }},
+      { $sort: { _id: 1 } },
+      { $limit: 12 },
+    ]);
+    const monthlyStatsFormatted = monthlyStats.map(m => ({
+      month: m._id,
+      posts: m.posts,
+      likes: m.likes,
+      comments: m.comments,
+    }));
+
+    const recentActivityDocs = await Notification.find({ recipient: userId })
+      .populate('sender', 'username')
+      .sort({ createdAt: -1 })
+      .limit(10);
+
+    const recentActivity = recentActivityDocs.map(n => {
+      const senderName = (n.sender as any)?.username || 'Someone';
+      const descriptions: Record<string, string> = {
+        like: `${senderName} liked your post`,
+        comment: `${senderName} commented on your post`,
+        follow: `${senderName} followed you`,
+        message: `${senderName} sent you a message`,
+        bookmark: `${senderName} bookmarked your post`,
+      };
+      return {
+        type: n.type === 'bookmark' ? 'post' : n.type === 'message' ? 'comment' : n.type,
+        description: descriptions[n.type] || `${senderName} interacted with you`,
+        timestamp: n.createdAt,
+      };
+    });
+
+    res.json({
+      totalPosts: allTimePosts,
+      totalLikes: allTimeLikes,
+      totalComments,
+      totalViews,
+      followersCount,
+      followingCount,
+      engagementRate: Math.round(engagementRate * 10) / 10,
+      topPosts: topPostsFormatted,
+      monthlyStats: monthlyStatsFormatted,
+      recentActivity,
+    });
+  } catch {
+    res.status(500).json({ message: 'Failed to fetch analytics' });
   }
 });
 

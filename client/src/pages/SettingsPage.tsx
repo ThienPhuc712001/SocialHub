@@ -692,20 +692,7 @@ const SettingsPage: React.FC = () => {
                 <DollarSign size={16} className="text-green-400" />
                 <span className="text-green-400 font-medium text-sm">Earnings Summary</span>
               </div>
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <p className="text-2xl font-bold text-green-400">$127</p>
-                  <p className="text-text-secondary text-xs">This month</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-green-400">$23</p>
-                  <p className="text-text-secondary text-xs">From ads</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-green-400">$104</p>
-                  <p className="text-text-secondary text-xs">From subs</p>
-                </div>
-              </div>
+              <p className="text-text-muted text-sm">Earnings data will be available once monetization is enabled.</p>
             </div>
 
             <div className="flex justify-end pt-4">
