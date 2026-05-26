@@ -42,12 +42,19 @@ const SettingsPage: React.FC = () => {
   const [savingNotif, setSavingNotif] = useState(false)
   const [isPrivate, setIsPrivate] = useState(user?.isPrivate ?? false)
   const [savingPrivacy, setSavingPrivacy] = useState(false)
-  const [privacySettings, setPrivacySettings] = useState({
+  const [privacySettings, setPrivacySettings] = useState<{
+    postsVisibility: string
+    messagesFrom: string
+    storiesVisibility: string
+    profileVisibility: string
+    activityStatus: string
+    dataSharing: boolean
+  }>({
     postsVisibility: user?.privacySettings?.postsVisibility || 'public', // public, friends, private
     messagesFrom: user?.privacySettings?.messagesFrom || 'everyone', // everyone, friends, nobody
     storiesVisibility: user?.privacySettings?.storiesVisibility || 'public', // public, friends, close_friends
     profileVisibility: user?.privacySettings?.profileVisibility || 'public', // public, private
-    activityStatus: user?.privacySettings?.activityStatus || 'public', // public, friends, private
+    activityStatus: String(user?.privacySettings?.activityStatus ?? 'true'), // public, friends, private
     dataSharing: user?.privacySettings?.dataSharing || false
   })
   const [savingGranularPrivacy, setSavingGranularPrivacy] = useState(false)
@@ -179,27 +186,17 @@ const SettingsPage: React.FC = () => {
   const handleGranularPrivacyUpdate = async () => {
     setSavingGranularPrivacy(true)
     try {
-      await profiles.updatePrivacySettings(privacySettings)
+      const payload = {
+        ...privacySettings,
+        activityStatus: privacySettings.activityStatus === 'true',
+      }
+      await profiles.updatePrivacySettings(payload)
       await updateUser()
       addToast('Privacy settings updated', 'success')
     } catch {
       addToast('Failed to update privacy settings', 'error')
     } finally {
       setSavingGranularPrivacy(false)
-    }
-  }
-
-  const handleAddCloseFriend = async (userId: string) => {
-    try {
-      await profiles.addCloseFriend(userId)
-      const friend = blockedUsers.find(u => u._id === userId) ||
-                    await profiles.get(userId).then(res => res.data)
-      if (friend) {
-        setCloseFriends(prev => [...prev, friend])
-        addToast('Added to close friends', 'success')
-      }
-    } catch {
-      addToast('Failed to add close friend', 'error')
     }
   }
 
@@ -440,7 +437,7 @@ const SettingsPage: React.FC = () => {
               <label className="block text-text-secondary text-sm mb-2">Who can see my posts</label>
               <select
                 value={privacySettings.postsVisibility}
-                onChange={(e) => setPrivacySettings(prev => ({ ...prev, postsVisibility: e.target.value }))}
+                onChange={(e) => setPrivacySettings(prev => ({ ...prev, postsVisibility: e.target.value as 'public' | 'friends' | 'private' }))}
                 className="w-full px-3 py-2 input-glass rounded-lg text-text text-sm"
               >
                 <option value="public">Everyone</option>
@@ -453,7 +450,7 @@ const SettingsPage: React.FC = () => {
               <label className="block text-text-secondary text-sm mb-2">Who can message me</label>
               <select
                 value={privacySettings.messagesFrom}
-                onChange={(e) => setPrivacySettings(prev => ({ ...prev, messagesFrom: e.target.value }))}
+                onChange={(e) => setPrivacySettings(prev => ({ ...prev, messagesFrom: e.target.value as 'everyone' | 'friends' | 'none' }))}
                 className="w-full px-3 py-2 input-glass rounded-lg text-text text-sm"
               >
                 <option value="everyone">Everyone</option>
@@ -466,7 +463,7 @@ const SettingsPage: React.FC = () => {
               <label className="block text-text-secondary text-sm mb-2">Who can see my stories</label>
               <select
                 value={privacySettings.storiesVisibility}
-                onChange={(e) => setPrivacySettings(prev => ({ ...prev, storiesVisibility: e.target.value }))}
+                onChange={(e) => setPrivacySettings(prev => ({ ...prev, storiesVisibility: e.target.value as 'public' | 'friends' | 'private' }))}
                 className="w-full px-3 py-2 input-glass rounded-lg text-text text-sm"
               >
                 <option value="public">Everyone</option>
@@ -479,7 +476,7 @@ const SettingsPage: React.FC = () => {
               <label className="block text-text-secondary text-sm mb-2">Profile visibility</label>
               <select
                 value={privacySettings.profileVisibility}
-                onChange={(e) => setPrivacySettings(prev => ({ ...prev, profileVisibility: e.target.value }))}
+                onChange={(e) => setPrivacySettings(prev => ({ ...prev, profileVisibility: e.target.value as 'public' | 'friends' | 'private' }))}
                 className="w-full px-3 py-2 input-glass rounded-lg text-text text-sm"
               >
                 <option value="public">Public</option>
@@ -490,7 +487,7 @@ const SettingsPage: React.FC = () => {
             <div>
               <label className="block text-text-secondary text-sm mb-2">Activity status</label>
               <select
-                value={privacySettings.activityStatus}
+                value={String(privacySettings.activityStatus)}
                 onChange={(e) => setPrivacySettings(prev => ({ ...prev, activityStatus: e.target.value }))}
                 className="w-full px-3 py-2 input-glass rounded-lg text-text text-sm"
               >
@@ -638,7 +635,7 @@ const SettingsPage: React.FC = () => {
                 <label className="block text-text-secondary text-sm mb-2">Ad frequency</label>
                 <select
                   value={monetizationSettings.adsFrequency}
-                  onChange={(e) => setMonetizationSettings(prev => ({ ...prev, adsFrequency: e.target.value }))}
+                  onChange={(e) => setMonetizationSettings(prev => ({ ...prev, adsFrequency: e.target.value as 'low' | 'medium' | 'high' }))}
                   className="w-full px-3 py-2 input-glass rounded-lg text-text text-sm"
                 >
                   <option value="low">Low (1-2 ads per day)</option>

@@ -16,6 +16,7 @@ export interface IPost extends Document {
   content: string;
   image?: string;
   images: string[];
+  video?: string;
   author: mongoose.Types.ObjectId;
   likes: mongoose.Types.ObjectId[];
   commentCount: number;
@@ -51,6 +52,7 @@ const postSchema = new Schema<IPost>({
   content: { type: String, required: true },
   image: { type: String },
   images: [{ type: String }],
+  video: { type: String },
   author: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   likes: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   commentCount: { type: Number, default: 0 },

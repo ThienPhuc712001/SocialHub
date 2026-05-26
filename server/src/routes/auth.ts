@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import User from '../models/User';
 import RefreshToken from '../models/RefreshToken';
 import PasswordReset from '../models/PasswordReset';
@@ -10,6 +11,12 @@ import { registerValidation, loginValidation, forgotPasswordValidation, resetPas
 import { validate } from '../middleware/validation';
 
 const router = express.Router();
+
+const loginLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 5,
+  message: 'Too many login attempts, please try again later',
+});
 
 const generateTokens = (userId: string) => {
   const token = jwt.sign({ id: userId }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
@@ -39,7 +46,7 @@ router.post('/register', registerValidation, validate, async (req: Request, res:
   }
 });
 
-router.post('/login', loginValidation, validate, async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, loginValidation, validate, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
     const normalizedEmail = email.toLowerCase().trim();

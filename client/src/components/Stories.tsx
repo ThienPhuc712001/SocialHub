@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence, PanInfo } from 'framer-motion'
 import { useAuth } from '../contexts/AuthContext'
 import { useSocket } from '../contexts/SocketContext'
@@ -38,15 +38,15 @@ const Stories: React.FC = () => {
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([])
   const [ownStories, setOwnStories] = useState<Story[]>([])
   const [compressingImage, setCompressingImage] = useState(false)
-  const storyViewerRef = useFocusTrap(!!(viewingGroup || viewingHighlight))
-  const createStoryRef = useFocusTrap(showCreate)
-  const createHighlightRef = useFocusTrap(showCreateHighlight)
-  const storyDragRef = useRef<HTMLDivElement>(null)
+  const storyViewerRef = useFocusTrap<HTMLDivElement>(!!(viewingGroup || viewingHighlight))
+  const createStoryRef = useFocusTrap<HTMLDivElement>(showCreate)
+  const createHighlightRef = useFocusTrap<HTMLDivElement>(showCreateHighlight)
+
 
   useEffect(() => {
     if (!isAuthenticated) return
     const fetchStories = async () => {
-      try { const res = await storyService.get(); setStoryGroups(res.data) } catch {
+      try { const res = await storyService.get(); setStoryGroups(res.data.groups || []) } catch {
         // Ignore story fetch errors
       }
     }
@@ -121,7 +121,7 @@ const Stories: React.FC = () => {
       }
       addToast('Story created!', 'success')
       setShowCreate(false); setContent(''); setImage(null); setImagePreview(null)
-      const res = await storyService.get(); setStoryGroups(res.data)
+      const res = await storyService.get(); setStoryGroups(res.data.groups || [])
     } catch { addToast('Failed to create story', 'error') }
   }
 
@@ -245,7 +245,7 @@ const Stories: React.FC = () => {
 
   const viewerAuthor = viewingGroup?.author || (viewingHighlight ? { _id: viewingHighlight.author, username: viewingHighlight.name, avatar: undefined } : null)
 
-  const handleDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const swipeThreshold = 50
     const velocityThreshold = 500
 
@@ -436,10 +436,7 @@ const Stories: React.FC = () => {
               dragElastic={0.2}
               onDragEnd={handleDragEnd}
               onClick={e => e.stopPropagation()}
-              ref={(el) => {
-                storyViewerRef.current = el
-                storyDragRef.current = el
-              }}
+              ref={storyViewerRef}
               role="dialog" aria-modal="true" aria-label="Story viewer"
               className="relative w-full max-w-lg h-[85vh] glass-card rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing touch-none">
               <div className="absolute top-0 left-0 right-0 p-4 z-10 bg-gradient-to-b from-black/40 via-black/20 to-transparent">

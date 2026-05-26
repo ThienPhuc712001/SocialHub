@@ -20,7 +20,7 @@ const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('')
   const [loading, setLoading] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
-  const forgotModalRef = useFocusTrap(showForgotPassword)
+  const forgotModalRef = useFocusTrap<HTMLDivElement>(showForgotPassword)
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
   const [resetStep, setResetStep] = useState(0)

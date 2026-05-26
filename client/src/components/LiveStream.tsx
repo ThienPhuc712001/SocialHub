@@ -18,16 +18,8 @@ interface ChatMessage {
 }
 
 interface LiveStreamProps {
-  onStreamStart?: (streamId: string) => void
+  onStreamStart?: (_streamId: string) => void
   onStreamEnd?: () => void
-}
-
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-  ],
 }
 
 const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) => {
@@ -38,7 +30,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
   const previewVideoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const previewStreamRef = useRef<MediaStream | null>(null)
-  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamIdRef = useRef<string | null>(null)
   const startModalRef = useFocusTrap(false) as any
 
@@ -194,7 +186,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
           await video.play()
         } catch {
           video.muted = true
-          try { await video.play() } catch {}
+          try { await video.play() } catch { /* ignore autoplay block */ }
         }
       }
 
@@ -205,6 +197,31 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
       streamIdRef.current = streamData._id
 
       socket.emit('livestream:host-join', { streamId: streamData._id })
+
+      const encoderMimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+        ? 'video/webm;codecs=vp8,opus'
+        : 'video/webm'
+
+      const recorder = new MediaRecorder(stream, { mimeType: encoderMimeType })
+
+      recorder.ondataavailable = async (event) => {
+        if (event.data.size > 0 && streamIdRef.current) {
+          const arrayBuf = await event.data.arrayBuffer()
+          socket.emit('livestream:stream-chunk', {
+            streamId: streamIdRef.current,
+            chunk: arrayBuf,
+            mimeType: encoderMimeType,
+          })
+        }
+      }
+
+      recorder.onstop = () => {
+        stopTracks(streamRef.current)
+        streamRef.current = null
+      }
+
+      recorder.start(1000)
+      mediaRecorderRef.current = recorder
 
       setIsLive(true)
       setViewerCount(0)
@@ -244,8 +261,9 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
   const stopStream = useCallback(async () => {
     if (!socket || !streamIdRef.current) return
 
-    peerConnectionsRef.current.forEach(pc => pc.close())
-    peerConnectionsRef.current.clear()
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
 
     stopTracks(streamRef.current)
     streamRef.current = null
@@ -258,7 +276,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
 
     try {
       await livestreamService.end(streamIdRef.current)
-    } catch {}
+    } catch { /* ignore end error */ }
 
     setIsLive(false)
     setViewerCount(0)
@@ -268,129 +286,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
     streamIdRef.current = null
     onStreamEnd?.()
     addToast('Stream ended', 'info')
-  }, [socket, onStreamEnd, addToast, stopTracks, assignVideoSrc])
-
-  const createPeerConnection = useCallback((viewerSocketId: string) => {
-    if (!socket || !streamRef.current || !streamIdRef.current) return
-
-    const pc = new RTCPeerConnection(ICE_SERVERS)
-
-    streamRef.current.getTracks().forEach(track => {
-      pc.addTrack(track, streamRef.current!)
-    })
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit('livestream:ice-candidate', {
-          streamId: streamIdRef.current!,
-          targetSocketId: viewerSocketId,
-          candidate: event.candidate.toJSON(),
-        })
-      }
-    }
-
-    pc.onnegotiationneeded = async () => {
-      try {
-        const offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
-        socket.emit('livestream:offer', {
-          streamId: streamIdRef.current!,
-          targetSocketId: viewerSocketId,
-          offer,
-        })
-      } catch (err) {
-        console.error('Negotiation error:', err)
-      }
-    }
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        pc.close()
-        peerConnectionsRef.current.delete(viewerSocketId)
-      }
-    }
-
-    peerConnectionsRef.current.set(viewerSocketId, pc)
-  }, [socket])
-
-  useEffect(() => {
-    if (!socket || !isLive) return
-
-    const handleViewerJoined = (data: { streamId: string; viewerSocketId: string }) => {
-      if (data.streamId !== streamIdRef.current) return
-      createPeerConnection(data.viewerSocketId)
-    }
-
-    const handleAnswer = (data: { streamId: string; viewerSocketId: string; answer: RTCSessionDescriptionInit }) => {
-      if (data.streamId !== streamIdRef.current) return
-      const pc = peerConnectionsRef.current.get(data.viewerSocketId)
-      if (pc) {
-        pc.setRemoteDescription(new RTCSessionDescription(data.answer))
-      }
-    }
-
-    const handleIceCandidate = (data: { streamId: string; fromSocketId: string; candidate: RTCIceCandidateInit }) => {
-      if (data.streamId !== streamIdRef.current) return
-      const pc = peerConnectionsRef.current.get(data.fromSocketId)
-      if (pc) {
-        pc.addIceCandidate(new RTCIceCandidate(data.candidate))
-      }
-    }
-
-    const handleViewerLeft = (data: { streamId: string; viewerSocketId: string }) => {
-      if (data.streamId !== streamIdRef.current) return
-      const pc = peerConnectionsRef.current.get(data.viewerSocketId)
-      if (pc) {
-        pc.close()
-        peerConnectionsRef.current.delete(data.viewerSocketId)
-      }
-    }
-
-    const handleViewerCount = (data: { streamId: string; count: number }) => {
-      if (data.streamId !== streamIdRef.current) return
-      setViewerCount(data.count)
-    }
-
-    const handleChat = (data: { streamId: string; userId: string; username: string; message: string; timestamp: string }) => {
-      if (data.streamId !== streamIdRef.current) return
-      setChatMessages(prev => [...prev.slice(-49), {
-        id: `${Date.now()}-${Math.random()}`,
-        userId: data.userId,
-        username: data.username,
-        message: data.message,
-        timestamp: new Date(data.timestamp),
-      }])
-    }
-
-    const handleLike = (data: { streamId: string; likeCount: number }) => {
-      if (data.streamId !== streamIdRef.current) return
-      setLikeCount(data.likeCount)
-    }
-
-    const handleHostDisconnected = () => {
-      stopStream()
-    }
-
-    socket.on('livestream:viewer-joined', handleViewerJoined)
-    socket.on('livestream:answer', handleAnswer)
-    socket.on('livestream:ice-candidate', handleIceCandidate)
-    socket.on('livestream:viewer-left', handleViewerLeft)
-    socket.on('livestream:viewer-count', handleViewerCount)
-    socket.on('livestream:chat', handleChat)
-    socket.on('livestream:like', handleLike)
-    socket.on('livestream:host-disconnected', handleHostDisconnected)
-
-    return () => {
-      socket.off('livestream:viewer-joined', handleViewerJoined)
-      socket.off('livestream:answer', handleAnswer)
-      socket.off('livestream:ice-candidate', handleIceCandidate)
-      socket.off('livestream:viewer-left', handleViewerLeft)
-      socket.off('livestream:viewer-count', handleViewerCount)
-      socket.off('livestream:chat', handleChat)
-      socket.off('livestream:like', handleLike)
-      socket.off('livestream:host-disconnected', handleHostDisconnected)
-    }
-  }, [socket, isLive, createPeerConnection, stopStream])
+  }, [socket, onStreamEnd, addToast, stopTracks])
 
   const toggleCamera = useCallback(async () => {
     const newState = !cameraEnabled
@@ -399,20 +295,17 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
     if (streamRef.current) {
       const videoTracks = streamRef.current.getVideoTracks()
       if (newState) {
-        try {
-          const newStream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: selectedCamera ? { exact: selectedCamera } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
-          })
-          const newVideoTrack = newStream.getVideoTracks()[0]
-          videoTracks.forEach(track => track.stop())
-          streamRef.current.removeTrack(videoTracks[0])
-          streamRef.current.addTrack(newVideoTrack)
-          peerConnectionsRef.current.forEach(pc => {
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-            if (sender) sender.replaceTrack(newVideoTrack)
-          })
-          assignVideoSrc(videoRef.current, streamRef.current)
-        } catch {}
+        videoTracks.forEach(track => { track.enabled = true })
+        if (videoTracks.length === 0) {
+          try {
+            const newStream = await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: selectedCamera ? { exact: selectedCamera } : undefined, width: { ideal: 1280 }, height: { ideal: 720 } },
+            })
+            const newVideoTrack = newStream.getVideoTracks()[0]
+            streamRef.current.addTrack(newVideoTrack)
+            if (videoRef.current) videoRef.current.srcObject = streamRef.current
+          } catch { /* ignore getUserMedia */ }
+        }
       } else {
         videoTracks.forEach(track => { track.enabled = false })
       }
@@ -422,7 +315,7 @@ const LiveStream: React.FC<LiveStreamProps> = ({ onStreamStart, onStreamEnd }) =
         videoTracks.forEach(track => { track.enabled = false })
       }
     }
-  }, [cameraEnabled, selectedCamera, assignVideoSrc])
+  }, [cameraEnabled, selectedCamera])
 
   const toggleMic = useCallback(() => {
     const newState = !micEnabled

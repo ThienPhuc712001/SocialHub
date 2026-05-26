@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { useAuth } from '../contexts/AuthContext'
-import { useToast } from '../contexts/ToastContext'
-import { profiles, posts } from '../services/api'
+import { profiles } from '../services/api'
 import {
   BarChart3,
   TrendingUp,
@@ -13,9 +11,9 @@ import {
   Calendar,
   Award,
   Target,
-  Activity,
-  Sparkles
+  Activity
 } from 'lucide-react'
+import { Sparkles } from '@/components/ui/sparkles'
 import { formatRelativeTime } from '../utils/format'
 
 interface AnalyticsData {
@@ -48,8 +46,6 @@ interface AnalyticsData {
 }
 
 const AnalyticsPage: React.FC = () => {
-  const { user } = useAuth()
-  const { addToast } = useToast()
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -272,7 +268,7 @@ const AnalyticsPage: React.FC = () => {
           >
             <h3 className="text-lg font-semibold gradient-text mb-4">Top Performing Posts</h3>
             <div className="space-y-4">
-              {analytics.topPosts.map((post, index) => (
+              {analytics.topPosts.map((post, _index) => (
                 <div key={post._id} className="p-4 glass-card rounded-xl">
                   <p className="text-text mb-3 line-clamp-2">{post.content}</p>
                   <div className="flex items-center justify-between text-sm">

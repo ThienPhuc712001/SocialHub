@@ -77,7 +77,7 @@ const MessagesPage: React.FC = () => {
   const fetchGroupMessages = useCallback(async (groupId: string) => {
     try {
       const response = await conversationService.getMessages(groupId)
-      setChatMessages(response.data.messages.reverse())
+      setChatMessages((response.data.messages || []).reverse())
     } catch { addToast('Failed to load messages', 'error') }
   }, [addToast])
 
@@ -243,7 +243,7 @@ const MessagesPage: React.FC = () => {
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setShowCreateGroup(true)}
+              onClick={() => { setIsGroupChat(false); setSelectedGroup(null); setSelectedUser(null); setChatMessages([]); clearSearch(); }}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 !isGroupChat ? 'bg-primary text-white' : 'text-text-muted hover:bg-surface/40'
               }`}
@@ -253,7 +253,7 @@ const MessagesPage: React.FC = () => {
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => setShowCreateGroup(true)}
+              onClick={() => { setIsGroupChat(true); setSelectedGroup(null); setSelectedUser(null); setChatMessages([]); clearSearch(); }}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 isGroupChat ? 'bg-primary text-white' : 'text-text-muted hover:bg-surface/40'
               }`}
@@ -271,73 +271,92 @@ const MessagesPage: React.FC = () => {
               <p className="text-sm">No conversations yet</p>
             </div>
           )}
-          {/* Group Conversations */}
-          {groupConversations.map((group, index) => (
-            <motion.button key={`group-${group._id}`}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: index * 0.06, duration: 0.4 }}
-              whileHover={{ x: 4 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => selectGroupConversation(group)}
-              className={`w-full flex items-center space-x-3 p-3 transition-all duration-200 card-press ${
-                selectedGroup?._id === group._id ? 'bg-gradient-to-r from-primary/10 to-accent/10 border-l-2 border-primary glow-sm' : 'hover:bg-surface/40'
-              }`}>
-              <div className="relative">
-                <div className="w-10 h-10 bg-gradient-to-br from-accent to-pink-500 rounded-full flex items-center justify-center">
-                  <MessageCircle size={18} className="text-white" />
+          {isGroupChat && (
+            <>
+              {groupConversations.map((group, index) => (
+                <motion.button key={`group-${group._id}`}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.06, duration: 0.4 }}
+                  whileHover={{ x: 4 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => selectGroupConversation(group)}
+                  className={`w-full flex items-center space-x-3 p-3 transition-all duration-200 card-press ${
+                    selectedGroup?._id === group._id ? 'bg-gradient-to-r from-primary/10 to-accent/10 border-l-2 border-primary glow-sm' : 'hover:bg-surface/40'
+                  }`}>
+                  <div className="relative">
+                    <div className="w-10 h-10 bg-gradient-to-br from-accent to-pink-500 rounded-full flex items-center justify-center">
+                      <MessageCircle size={18} className="text-white" />
+                    </div>
+                    <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs font-bold">{group.participants?.length || 0}</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-text font-medium text-sm truncate">{group.name}</p>
+                    {group.lastMessage && (
+                      <p className="text-text-subtle text-xs truncate">{group.lastMessage}</p>
+                    )}
+                  </div>
+                </motion.button>
+              ))}
+              {groupConversations.length === 0 && (
+                <div className="p-6 text-center text-text-muted">
+                  <p className="text-sm">No group conversations yet</p>
                 </div>
-                <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">{group.participants?.length || 0}</span>
-                </div>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-text font-medium text-sm truncate">{group.name}</p>
-                {group.lastMessage && (
-                  <p className="text-text-subtle text-xs truncate">{group.lastMessage.content}</p>
-                )}
-              </div>
-            </motion.button>
-          ))}
+              )}
+            </>
+          )}
 
-          {/* Individual Conversations */}
-          {conversations.map((conv, index) => (
-            <motion.button key={conv._id}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: (groupConversations.length + index) * 0.06, duration: 0.4 }}
-              whileHover={{ x: 4 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => selectConversation(conv)}
-              className={`w-full flex items-center space-x-3 p-3 transition-all duration-200 card-press ${
-                selectedUser?._id === conv._id ? 'bg-gradient-to-r from-primary/10 to-accent/10 border-l-2 border-primary glow-sm' : 'hover:bg-surface/40'
-              }`}>
-              <div className="relative">
-                <Avatar src={conv.avatar} name={conv.username} size={38} />
-                {onlineUsers.includes(conv._id) && (
-                  <motion.span
-                    animate={{ scale: [1, 1.3, 1] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                    className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-card shadow-[0_0_8px_rgba(74,222,128,0.6)]"
-                  />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-text font-medium text-sm truncate">{conv.username}</p>
-                {conv.lastMessage && (
-                  <p className="text-text-subtle text-xs truncate">{conv.lastMessage}</p>
-                )}
-                {(conv.unreadCount ?? 0) > 0 && (
-                  <motion.span
-                    animate={{ scale: [1, 1.2, 1] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                    className="text-xs bg-gradient-to-r from-accent to-pink-500 text-white rounded-full px-1.5 py-0.5 font-bold shadow-glow-sm mt-0.5 inline-block">
-                    {conv.unreadCount}
-                  </motion.span>
-                )}
-              </div>
-            </motion.button>
-          ))}
+          {!isGroupChat && (
+            <>
+              {conversations.map((conv, index) => (
+                <motion.button key={conv._id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.06, duration: 0.4 }}
+                  whileHover={{ x: 4 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => selectConversation(conv)}
+                  className={`w-full flex items-center space-x-3 p-3 transition-all duration-200 card-press ${
+                    selectedUser?._id === conv._id ? 'bg-gradient-to-r from-primary/10 to-accent/10 border-l-2 border-primary glow-sm' : 'hover:bg-surface/40'
+                  }`}>
+                  <div className="relative">
+                    <Avatar src={conv.avatar} name={conv.username} size={38} />
+                    {onlineUsers.includes(conv._id) && (
+                      <motion.span
+                        animate={{ scale: [1, 1.3, 1] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                        className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-card shadow-[0_0_8px_rgba(74,222,128,0.6)]"
+                      />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-text font-medium text-sm truncate">{conv.username}</p>
+                    {conv.lastMessage && (
+                      <p className="text-text-subtle text-xs truncate">{conv.lastMessage}</p>
+                    )}
+                    {(conv.unreadCount ?? 0) > 0 && (
+                      <motion.span
+                        animate={{ scale: [1, 1.2, 1] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                        className="text-xs bg-gradient-to-r from-accent to-pink-500 text-white rounded-full px-1.5 py-0.5 font-bold shadow-glow-sm mt-0.5 inline-block">
+                        {conv.unreadCount}
+                      </motion.span>
+                    )}
+                  </div>
+                </motion.button>
+              ))}
+              {conversations.length === 0 && (
+                <div className="p-6 text-center text-text-muted">
+                  <div className="w-16 h-16 glass-card rounded-full flex items-center justify-center mx-auto mb-3">
+                    <MessageCircle size={28} className="text-text-muted opacity-50" />
+                  </div>
+                  <p className="text-sm">No conversations yet</p>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
 

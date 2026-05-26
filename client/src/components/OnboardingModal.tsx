@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, User, Users, Zap, Camera, Sparkles, Check, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -25,7 +25,7 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClose }) =>
   const [avatar, setAvatar] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [compressingImage, setCompressingImage] = useState(false)
-  const modalRef = useFocusTrap(isOpen)
+  const modalRef = useFocusTrap<HTMLDivElement>(isOpen)
 
   const steps = [
     {

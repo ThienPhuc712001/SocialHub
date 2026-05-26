@@ -2,14 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { posts, Post as PostType } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { useToast } from '../contexts/ToastContext'
 import { getErrorMessage, getEnhancedErrorDetails } from '../utils/format'
 import Post from '../components/Post'
 import { Sparkles } from '@/components/ui/sparkles'
 
 const ReelsPage: React.FC = () => {
   const { isAuthenticated } = useAuth()
-  const { addToast } = useToast()
   const [reels, setReels] = useState<PostType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

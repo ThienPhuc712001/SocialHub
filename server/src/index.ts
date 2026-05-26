@@ -26,6 +26,7 @@ import User from './models/User';
 import { adminMiddleware } from './middleware/auth';
 import errorHandler from './middleware/errorHandler';
 import sanitize from './middleware/sanitize';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -35,6 +36,13 @@ for (const envVar of requiredEnvVars) {
     console.error(`Missing required environment variable: ${envVar}`);
     process.exit(1);
   }
+}
+
+// Ensure uploads directory exists (prevents 500 on avatar/cover/post uploads)
+const uploadsDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('Created uploads directory');
 }
 
 const app = express();
@@ -52,12 +60,6 @@ const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 300,
   message: 'Too many requests, please try again later',
-});
-
-const loginLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 5,
-  message: 'Too many login attempts, please try again later',
 });
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -87,7 +89,6 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/auth/login', loginLimiter);
 app.use('/api/posts', apiLimiter, postRoutes);
 app.use('/api/profile', apiLimiter, profileRoutes);
 app.use('/api/messages', apiLimiter, messageRoutes);
@@ -117,6 +118,7 @@ const io = new Server(server, {
 const onlineUsers = new Map<string, Set<string>>();
 const streamHosts = new Map<string, string>();
 const streamViewers = new Map<string, Set<string>>();
+const pendingViewers = new Map<string, { socketId: string; userId: string }[]>();
 
 io.use((socket: Socket, next) => {
   const token = socket.handshake.auth.token;
@@ -151,6 +153,16 @@ io.on('connection', (socket: Socket) => {
   socket.on('livestream:host-join', async (data: { streamId: string }) => {
     streamHosts.set(data.streamId, socket.id);
     socket.join(`livestream:${data.streamId}`);
+
+    const pended = pendingViewers.get(data.streamId) || [];
+    pendingViewers.delete(data.streamId);
+    for (const viewer of pended) {
+      io.to(socket.id).emit('livestream:viewer-joined', {
+        streamId: data.streamId,
+        viewerSocketId: viewer.socketId,
+        viewerUserId: viewer.userId,
+      });
+    }
   });
 
   socket.on('livestream:viewer-join', async (data: { streamId: string }) => {
@@ -165,9 +177,14 @@ io.on('connection', (socket: Socket) => {
     });
 
     io.to(`livestream:${data.streamId}`).emit('livestream:viewer-count', { streamId: data.streamId, count });
+
     const hostSocketId = streamHosts.get(data.streamId);
     if (hostSocketId) {
       io.to(hostSocketId).emit('livestream:viewer-joined', { streamId: data.streamId, viewerSocketId: socket.id, viewerUserId: userId });
+    } else {
+      const list = pendingViewers.get(data.streamId) || [];
+      list.push({ socketId: socket.id, userId });
+      pendingViewers.set(data.streamId, list);
     }
   });
 
@@ -186,16 +203,8 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  socket.on('livestream:offer', (data: { streamId: string; targetSocketId: string; offer: any }) => {
-    io.to(data.targetSocketId).emit('livestream:offer', { streamId: data.streamId, hostSocketId: socket.id, offer: data.offer });
-  });
-
-  socket.on('livestream:answer', (data: { streamId: string; hostSocketId: string; answer: any }) => {
-    io.to(data.hostSocketId).emit('livestream:answer', { streamId: data.streamId, viewerSocketId: socket.id, answer: data.answer });
-  });
-
-  socket.on('livestream:ice-candidate', (data: { streamId: string; targetSocketId: string; candidate: any }) => {
-    io.to(data.targetSocketId).emit('livestream:ice-candidate', { streamId: data.streamId, fromSocketId: socket.id, candidate: data.candidate });
+  socket.on('livestream:stream-chunk', (data: { streamId: string; chunk: Buffer }) => {
+    socket.to(`livestream:${data.streamId}`).emit('livestream:stream-chunk', data);
   });
 
   socket.on('livestream:chat', async (data: { streamId: string; message: string }) => {
@@ -249,6 +258,12 @@ io.on('connection', (socket: Socket) => {
     }
     io.emit('onlineUsers', Array.from(onlineUsers.keys()));
 
+    for (const [streamId, list] of pendingViewers.entries()) {
+      const filtered = list.filter(v => v.socketId !== socket.id);
+      if (filtered.length === 0) pendingViewers.delete(streamId);
+      else pendingViewers.set(streamId, filtered);
+    }
+
     for (const [streamId, viewers] of streamViewers.entries()) {
       if (viewers.has(socket.id)) {
         viewers.delete(socket.id);
@@ -266,14 +281,15 @@ io.on('connection', (socket: Socket) => {
       if (hostSocketId === socket.id) {
         streamHosts.delete(streamId);
         streamViewers.delete(streamId);
-        LiveStream.findByIdAndUpdate(streamId, {
-          status: 'ended',
-          endedAt: new Date(),
-          viewerCount: 0,
-          $set: {
-            duration: Math.floor((Date.now() - (streamId ? 0 : Date.now())) / 1000),
-          },
-        }).exec();
+        LiveStream.findById(streamId).then(streamDoc => {
+          if (streamDoc && streamDoc.status !== 'ended') {
+            streamDoc.status = 'ended';
+            streamDoc.endedAt = new Date();
+            streamDoc.duration = Math.floor((streamDoc.endedAt.getTime() - streamDoc.startedAt.getTime()) / 1000);
+            streamDoc.viewerCount = 0;
+            streamDoc.save();
+          }
+        }).catch(() => {});
         io.to(`livestream:${streamId}`).emit('livestream:host-disconnected', { streamId });
       }
     }

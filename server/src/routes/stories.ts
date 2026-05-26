@@ -11,10 +11,17 @@ const router = express.Router();
 
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const skip = (page - 1) * limit;
+
+    const total = await Story.countDocuments();
     const stories = await Story.find()
       .populate('author', 'username avatar')
       .populate('viewers', 'username avatar')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     const grouped = new Map();
     stories.forEach((story: any) => {
@@ -25,7 +32,7 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
       grouped.get(authorId).stories.push(story);
     });
 
-    res.json(Array.from(grouped.values()));
+    res.json({ groups: Array.from(grouped.values()), total, page, pages: Math.ceil(total / limit) });
   } catch (error: any) {
     res.status(500).json({ message: 'Internal server error' });
   }

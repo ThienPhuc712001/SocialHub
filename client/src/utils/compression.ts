@@ -104,8 +104,7 @@ export const compressVideo = async (
   const {
     maxWidth = 1280,
     maxHeight = 720,
-    maxSizeMB = 50,
-    quality = 0.8
+    maxSizeMB = 50
   } = options
 
   // For now, we'll do basic size checking and return original if under limit
@@ -115,12 +114,12 @@ export const compressVideo = async (
   }
 
   // Create a simple video element to check dimensions
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _reject) => {
     const video = document.createElement('video')
 
     video.onloadedmetadata = () => {
       const canvas = document.createElement('canvas')
-      const ctx = canvas.getContext('2d')
+      canvas.getContext('2d')
 
       let { videoWidth, videoHeight } = video
 

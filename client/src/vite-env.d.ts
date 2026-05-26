@@ -3,6 +3,9 @@
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL: string
   readonly VITE_SOCKET_URL: string
+  readonly VITE_VAPID_PUBLIC_KEY?: string
+  readonly VITE_TURN_URL?: string
+  readonly VITE_TURN_CREDENTIAL?: string
 }
 
 interface ImportMeta {

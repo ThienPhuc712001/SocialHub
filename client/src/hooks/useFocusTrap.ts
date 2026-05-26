@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
-export const useFocusTrap = (isActive: boolean) => {
-  const containerRef = useRef<HTMLElement>(null)
+export const useFocusTrap = <T extends HTMLElement = HTMLElement>(isActive: boolean, onClose?: () => void) => {
+  const containerRef = useRef<T>(null)
 
   useEffect(() => {
     if (!isActive || !containerRef.current) return
@@ -29,9 +29,8 @@ export const useFocusTrap = (isActive: boolean) => {
     }
 
     const handleEscapeKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        // Close modal or whatever action is needed
-        // This would need to be passed as a callback
+      if (e.key === 'Escape' && onClose) {
+        onClose()
       }
     }
 
@@ -47,7 +46,7 @@ export const useFocusTrap = (isActive: boolean) => {
       document.removeEventListener('keydown', handleTabKey)
       document.removeEventListener('keydown', handleEscapeKey)
     }
-  }, [isActive])
+  }, [isActive, onClose])
 
   return containerRef
 }

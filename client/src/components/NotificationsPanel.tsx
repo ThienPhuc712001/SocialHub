@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import { X } from 'lucide-react'
-import { notificationService, Notification } from '../services/api'
+import { notificationService, Notification as AppNotification } from '../services/api'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
 import { formatRelativeTime } from '../utils/format'
@@ -13,7 +13,7 @@ interface Props {
 }
 
 const NotificationsPanel: React.FC<Props> = ({ onClose, onRead }) => {
-  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
   const { addToast } = useToast()
@@ -38,7 +38,7 @@ const NotificationsPanel: React.FC<Props> = ({ onClose, onRead }) => {
     } catch { addToast('Failed to mark as read', 'error') }
   }
 
-  const handleClick = async (n: Notification) => {
+  const handleClick = async (n: AppNotification) => {
     if (!n.read) {
       try {
         await notificationService.markRead(n._id)

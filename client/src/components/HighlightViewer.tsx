@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence, PanInfo } from 'framer-motion'
-import { X, ChevronLeft, ChevronRight, Eye, Heart, MessageCircle, Share2, Send } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Eye, MessageCircle, Send } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { useToast } from '../contexts/ToastContext'
-import { highlightService, storyService, StoryHighlight, Story } from '../services/api'
+import { storyService, StoryHighlight } from '../services/api'
 import Avatar from './Avatar'
 import { formatRelativeTime } from '../utils/format'
 import { useFocusTrap } from '../hooks/useFocusTrap'
@@ -19,18 +18,15 @@ const HighlightViewer: React.FC<HighlightViewerProps> = ({
   highlight,
   isOpen,
   onClose,
-  onUpdate
 }) => {
   const { user } = useAuth()
-  const { addToast } = useToast()
   const [currentIndex, setCurrentIndex] = useState(0)
   const [progress, setProgress] = useState(0)
   const [viewerCount, setViewerCount] = useState(0)
   const [messages, setMessages] = useState<Array<{ id: string; user: string; message: string; timestamp: Date }>>([])
   const [newMessage, setNewMessage] = useState('')
   const [showMessages, setShowMessages] = useState(false)
-  const modalRef = useFocusTrap(isOpen)
-  const storyRef = useRef<HTMLDivElement>(null)
+  const modalRef = useFocusTrap<HTMLDivElement>(isOpen)
 
   const currentStory = highlight.stories[currentIndex]
 
@@ -102,7 +98,7 @@ const HighlightViewer: React.FC<HighlightViewerProps> = ({
     }
   }
 
-  const handleDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const swipeThreshold = 50
     if (Math.abs(info.offset.x) > swipeThreshold) {
       if (info.offset.x > 0) {
@@ -156,10 +152,7 @@ const HighlightViewer: React.FC<HighlightViewerProps> = ({
           exit={{ scale: 0.8, opacity: 0 }}
           transition={{ type: 'spring', damping: 25, stiffness: 200 }}
           onClick={(e) => e.stopPropagation()}
-          ref={(el) => {
-            modalRef.current = el
-            storyRef.current = el
-          }}
+          ref={modalRef}
           role="dialog"
           aria-modal="true"
           aria-label={`Highlight: ${highlight.name}`}

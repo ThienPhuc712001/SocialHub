@@ -3,11 +3,16 @@ import { body, param, validationResult } from 'express-validator';
 import LiveStream from '../models/LiveStream';
 import authMiddleware, { AuthRequest } from '../middleware/auth';
 import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 const router = Router();
 
+const uploadsDir = path.join(__dirname, '../../uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
 const thumbnailStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, 'uploads/'),
+  destination: (_req, _file, cb) => cb(null, uploadsDir),
   filename: (_req, _file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`),
 });
 
@@ -116,26 +121,6 @@ router.put('/:id/like', authMiddleware, [
     await stream.save();
 
     res.json({ likeCount: stream.likeCount });
-  } catch (err: any) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-router.put('/:id/viewer-count', authMiddleware, [
-  param('id').isMongoId(),
-  body('count').isInt({ min: 0 }),
-], async (req: Request, res: Response) => {
-  try {
-    const stream = await LiveStream.findById(req.params.id);
-    if (!stream) return res.status(404).json({ message: 'Stream not found' });
-
-    stream.viewerCount = req.body.count;
-    if (req.body.count > stream.peakViewerCount) {
-      stream.peakViewerCount = req.body.count;
-    }
-
-    await stream.save();
-    res.json({ viewerCount: stream.viewerCount, peakViewerCount: stream.peakViewerCount });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

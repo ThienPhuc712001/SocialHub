@@ -9,8 +9,8 @@ import Block from '../models/Block';
 import Notification from '../models/Notification';
 import Message from '../models/Message';
 import authMiddleware, { AuthRequest } from '../middleware/auth';
-import { postUpload } from '../middleware/upload';
-import { createPostValidation, updatePostValidation, commentValidation, replyValidation } from '../middleware/validation';
+import { mediaUpload } from '../middleware/upload';
+import { createPostValidation, updatePostValidation, commentValidation } from '../middleware/validation';
 
 const router = express.Router();
 
@@ -316,15 +316,17 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   }
 });
 
-router.post('/', authMiddleware, postUpload.single('image'), createPostValidation, async (req: AuthRequest, res: Response) => {
+router.post('/', authMiddleware, mediaUpload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]), createPostValidation, async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   try {
     const { title, content } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : undefined;
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const image = files?.image?.[0] ? `/uploads/${files.image[0].filename}` : undefined;
+    const video = files?.video?.[0] ? `/uploads/${files.video[0].filename}` : undefined;
     const hashtags = extractHashtags(content);
-    const post = new Post({ title, content, image, hashtags, author: new mongoose.Types.ObjectId(req.user!.id) });
+    const post = new Post({ title, content, image, video, hashtags, author: new mongoose.Types.ObjectId(req.user!.id) });
     await post.save();
     await post.populate('author', 'username avatar');
     const io = req.app.get('io');
@@ -640,6 +642,64 @@ router.post('/:id/view', authMiddleware, async (req: AuthRequest, res: Response)
     }
     const updatedPost = await Post.findById(postId);
     res.json({ viewCount: updatedPost?.viewCount || 0 });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.post('/:id/pin', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const postId = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
+    const post = await Post.findById(postId);
+    if (!post || post.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Post not found' });
+    post.pinned = true;
+    await post.save();
+    res.json({ message: 'Post pinned' });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.delete('/:id/pin', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const postId = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
+    const post = await Post.findById(postId);
+    if (!post || post.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Post not found' });
+    post.pinned = false;
+    await post.save();
+    res.json({ message: 'Post unpinned' });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.post('/:id/share-to-chat', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const postId = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
+
+    const { targetUserId } = req.body;
+    if (!targetUserId || !mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ message: 'Invalid target user ID' });
+    }
+
+    const post = await Post.findById(postId).populate('author', 'username');
+    if (!post) return res.status(404).json({ message: 'Post not found' });
+
+    const message = new Message({
+      sender: new mongoose.Types.ObjectId(req.user!.id),
+      receiver: new mongoose.Types.ObjectId(targetUserId),
+      content: `Shared a post: ${post.content?.substring(0, 100) || ''}`,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+
+    const io = req.app.get('io');
+    io.to(targetUserId).emit('newMessage', message);
+
+    res.status(201).json({ message: 'Post shared to chat' });
   } catch (error: any) {
     res.status(500).json({ message: 'Internal server error' });
   }

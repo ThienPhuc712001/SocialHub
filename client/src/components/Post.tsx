@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { useBookmarks } from '../contexts/BookmarkContext'
 import { formatRelativeTime, getErrorMessage } from '../utils/format'
-import { getSocialAriaLabels, announceToScreenReader } from '../utils/accessibility'
+import { getSocialAriaLabels } from '../utils/accessibility'
 import Avatar from './Avatar'
 import VideoPost from './VideoPost'
 import { Sparkles } from '@/components/ui/sparkles'
@@ -15,8 +15,8 @@ import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface PostProps {
   post: PostType
-  onUpdate?: (updatedPost: PostType) => void
-  onDelete?: (postId: string) => void
+  onUpdate?: (_updatedPost: PostType) => void
+  onDelete?: (_postId: string) => void
 }
 
 interface ConversationPreview {
@@ -54,9 +54,9 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
   const [isPinned, setIsPinned] = useState(post.pinned)
   const [showLikeBurst, setShowLikeBurst] = useState(false)
   const isAuthor = post.author._id === user?._id
-  const deleteModalRef = useFocusTrap(showDeleteConfirm)
-  const reportModalRef = useFocusTrap(showReportModal)
-  const shareChatModalRef = useFocusTrap(showShareChatModal)
+  const deleteModalRef = useFocusTrap<HTMLDivElement>(showDeleteConfirm)
+  const reportModalRef = useFocusTrap<HTMLDivElement>(showReportModal)
+  const shareChatModalRef = useFocusTrap<HTMLDivElement>(showShareChatModal)
 
   useEffect(() => {
     if (showComments) {
@@ -471,7 +471,7 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
               controls
             />
           ) : (
-            <img src={post.image.startsWith('/') ? `${import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000'}${post.image}` : post.image}
+            <img src={(post.image || '').startsWith('/') ? `${import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000'}${post.image}` : post.image}
               alt={getSocialAriaLabels.postImage(post.author.username, post.content)} className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-[1.02]" loading="lazy" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />

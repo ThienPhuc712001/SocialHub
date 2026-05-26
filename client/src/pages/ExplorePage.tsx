@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, FileText, Users as UsersIcon, Hash, TrendingUp, UserPlus, X } from 'lucide-react'
+import { Search, FileText, Users as UsersIcon, Hash, TrendingUp, UserPlus, X, Sparkles as SparklesIcon } from 'lucide-react'
 import { profiles, posts, hashtagService, User, Post as PostType, HashtagFollow } from '../services/api'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
@@ -457,7 +457,7 @@ const ExplorePage: React.FC = () => {
       <div className="space-y-4">
         <div className="flex items-center space-x-2">
           <div className="p-1.5 bg-pink-500/15 rounded-lg">
-            <Sparkles size={18} className="text-pink-500" />
+            <SparklesIcon size={18} className="text-pink-500" />
           </div>
           <h3 className="text-lg font-semibold gradient-text">Recommended for You</h3>
         </div>

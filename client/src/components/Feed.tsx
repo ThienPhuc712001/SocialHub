@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { PostSkeleton } from '../components/ui/skeleton'
 import { getErrorMessage, getEnhancedErrorDetails } from '../utils/format'
-import { compressMediaFile, formatFileSize, shouldCompress } from '../utils/compression'
+import { compressMediaFile, shouldCompress } from '../utils/compression'
 
 interface Props {
   showCreateModal: boolean
@@ -41,7 +41,7 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
   const [pullDistance, setPullDistance] = useState(0)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const feedContainerRef = useRef<HTMLDivElement>(null)
-  const modalRef = useFocusTrap(showCreateModal)
+  const modalRef = useFocusTrap<HTMLDivElement>(showCreateModal)
 
   const fetchPosts = useCallback(async (pageNum: number, sortParam: 'latest' | 'popular', append: boolean = false) => {
     try {
@@ -100,7 +100,7 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
     }
   }, [sort])
 
-  const handleDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const pullThreshold = 80
     if (info.offset.y > pullThreshold && window.scrollY === 0) {
       handleRefresh()
@@ -108,7 +108,7 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
     setPullDistance(0)
   }
 
-  const handleDrag = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+  const handleDrag = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (window.scrollY === 0 && info.offset.y > 0) {
       setPullDistance(Math.min(info.offset.y, 120))
     }
@@ -149,65 +149,20 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
   const handleImageChange = async (file: File | null) => {
     if (file) {
       try {
-        // Clear video if image is selected
         setVideo(null)
         setVideoPreview(null)
-
-        // Show compression indicator for large files
         if (shouldCompress(file, 300)) {
           setCompressingImage(true)
           addToast('Compressing image...', 'info')
-
           const compressedFile = await compressMediaFile(file, 'post')
           const compressionRatio = ((file.size - compressedFile.size) / file.size * 100).toFixed(1)
-
           if (compressionRatio !== '0.0') {
             addToast(`Image compressed! Saved ${compressionRatio}%`, 'success')
-  }
-
-  const handleVideoChange = async (file: File | null) => {
-    if (file) {
-      try {
-        // Clear image if video is selected
-        setImage(null)
-        setImagePreview(null)
-
-        // Show compression indicator for large files
-        if (shouldCompress(file, 2000)) { // Lower threshold for videos
-          setCompressingVideo(true)
-          addToast('Processing video...', 'info')
-
-          const compressedFile = await compressMediaFile(file, 'post')
-          if (compressedFile.size !== file.size) {
-            addToast('Video processed for upload', 'success')
           }
-
-          setVideo(compressedFile)
-        } else {
-          setVideo(file)
-        }
-
-        const reader = new FileReader()
-        reader.onload = (e) => setVideoPreview(e.target?.result as string)
-        reader.readAsDataURL(file)
-      } catch (error) {
-        addToast('Failed to process video', 'error')
-        console.error('Video processing error:', error)
-      } finally {
-        setCompressingVideo(false)
-      }
-    } else {
-      setVideo(null)
-      setVideoPreview(null)
-      setCompressingVideo(false)
-    }
-  }
-
           setImage(compressedFile)
         } else {
           setImage(file)
         }
-
         const reader = new FileReader()
         reader.onload = (e) => setImagePreview(e.target?.result as string)
         reader.readAsDataURL(file)
@@ -224,9 +179,41 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
     }
   }
 
+  const handleVideoChange = async (file: File | null) => {
+    if (file) {
+      try {
+        setImage(null)
+        setImagePreview(null)
+        if (shouldCompress(file, 2000)) {
+          setCompressingVideo(true)
+          addToast('Processing video...', 'info')
+          const compressedFile = await compressMediaFile(file, 'post')
+          if (compressedFile.size !== file.size) {
+            addToast('Video processed for upload', 'success')
+          }
+          setVideo(compressedFile)
+        } else {
+          setVideo(file)
+        }
+        const reader = new FileReader()
+        reader.onload = (e) => setVideoPreview(e.target?.result as string)
+        reader.readAsDataURL(file)
+      } catch (error) {
+        addToast('Failed to process video', 'error')
+        console.error('Video processing error:', error)
+      } finally {
+        setCompressingVideo(false)
+      }
+    } else {
+      setVideo(null)
+      setVideoPreview(null)
+      setCompressingVideo(false)
+    }
+  }
+
   const handleCreatePost = async () => {
     try {
-      let data: FormData | { title?: string; content: string } = { title, content }
+      let data: FormData | { title: string; content: string } = { title: title || '', content }
 
       if (image || video) {
         const formData = new FormData()

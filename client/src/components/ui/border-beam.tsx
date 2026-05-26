@@ -34,8 +34,6 @@ export const BorderBeam: React.FC<BorderBeamProps> = ({
           maskImage: `linear-gradient(transparent, transparent), linear-gradient(white, white)`,
           maskComposite: "exclude",
           WebkitMaskComposite: "xor",
-          maskClipPath: "fill-box, border-box",
-          WebkitMaskClipPath: "fill-box, border-box",
         }}
       >
         <div

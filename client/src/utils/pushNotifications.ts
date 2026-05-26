@@ -33,11 +33,11 @@ interface PushNotificationPayload {
 
 class PushNotificationManager {
   private swRegistration: ServiceWorkerRegistration | null = null
-  private vapidPublicKey = 'BKxQzBJC5znH5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5Q9Z5n5' // This should come from server
+  private vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY || ''
 
   async init(): Promise<void> {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.warn('Push notifications not supported')
+    if (!this.vapidPublicKey) {
+      console.warn('VAPID public key not configured. Set VITE_VAPID_PUBLIC_KEY env var.')
       return
     }
 
@@ -65,7 +65,7 @@ class PushNotificationManager {
     try {
       const subscription = await this.swRegistration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: this.urlBase64ToUint8Array(this.vapidPublicKey)
+        applicationServerKey: this.urlBase64ToUint8Array(this.vapidPublicKey) as BufferSource
       })
 
       // Send subscription to server

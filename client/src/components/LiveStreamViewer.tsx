@@ -20,21 +20,14 @@ interface LiveStreamViewerProps {
   onLeave: () => void
 }
 
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-  ],
-}
-
 const LiveStreamViewer: React.FC<LiveStreamViewerProps> = ({ stream, onLeave }) => {
   const { user } = useAuth()
   const { socket } = useSocket()
   const { addToast } = useToast()
-const videoRef = useRef<HTMLVideoElement>(null)
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
-  const hostSocketIdRef = useRef<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const mediaSourceRef = useRef<MediaSource | null>(null)
+  const sourceBufferRef = useRef<SourceBuffer | null>(null)
+  const queueRef = useRef<ArrayBuffer[]>([])
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   const [viewerCount, setViewerCount] = useState(stream.viewerCount)
@@ -50,96 +43,78 @@ const videoRef = useRef<HTMLVideoElement>(null)
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
-  useEffect(() => {
-    setVolume(1)
-    if (videoRef.current) {
-      videoRef.current.volume = 1
+  const appendBuffer = useCallback((data: ArrayBuffer) => {
+    const sb = sourceBufferRef.current
+    if (!sb) {
+      queueRef.current.push(data)
+      return
+    }
+    if (sb.updating) {
+      queueRef.current.push(data)
+      return
+    }
+    sb.appendBuffer(data)
+
+    if (queueRef.current.length > 0) {
+      const next = queueRef.current.shift()
+      if (next) appendBuffer(next)
     }
   }, [])
-
-  const setupPeerConnection = useCallback(() => {
-    if (!socket || peerConnectionRef.current) return
-
-    const pc = new RTCPeerConnection(ICE_SERVERS)
-
-    pc.addTransceiver('video', { direction: 'recvonly' })
-    pc.addTransceiver('audio', { direction: 'recvonly' })
-
-    pc.ontrack = (event) => {
-      if (videoRef.current && event.streams && event.streams[0]) {
-        videoRef.current.srcObject = event.streams[0]
-        videoRef.current.play().catch(() => {})
-        setIsConnecting(false)
-      } else if (videoRef.current && event.track) {
-        const existingStream = videoRef.current.srcObject as MediaStream | null
-        if (existingStream) {
-          existingStream.addTrack(event.track)
-        } else {
-          const newStream = new MediaStream([event.track])
-          videoRef.current.srcObject = newStream
-        }
-        videoRef.current.play().catch(() => {})
-        setIsConnecting(false)
-      }
-    }
-
-pc.onicecandidate = (event) => {
-      if (event.candidate && socket && hostSocketIdRef.current) {
-        socket.emit('livestream:ice-candidate', {
-          streamId: stream._id,
-          targetSocketId: hostSocketIdRef.current,
-          candidate: event.candidate.toJSON(),
-        })
-      }
-    }
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') {
-        setIsConnecting(false)
-      }
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        addToast('Connection lost', 'warning')
-      }
-    }
-
-    peerConnectionRef.current = pc
-  }, [socket, stream._id, addToast])
 
   useEffect(() => {
     if (!socket) return
 
-    setupPeerConnection()
+    const ms = new MediaSource()
+    mediaSourceRef.current = ms
 
-    socket.emit('livestream:viewer-join', { streamId: stream._id })
-
-const handleOffer = async (data: { streamId: string; hostSocketId: string; offer: RTCSessionDescriptionInit }) => {
-      if (data.streamId !== stream._id) return
-      const pc = peerConnectionRef.current
-      if (!pc) return
-
-      hostSocketIdRef.current = data.hostSocketId
-
+    ms.onsourceopen = () => {
+      let codec = 'video/webm;codecs=vp8,opus'
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.offer))
-        const answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-
-        socket.emit('livestream:answer', {
-          streamId: stream._id,
-          hostSocketId: data.hostSocketId,
-          answer,
+        if (!MediaSource.isTypeSupported(codec)) {
+          codec = 'video/webm'
+        }
+        const sb = ms.addSourceBuffer(codec)
+        sourceBufferRef.current = sb
+        sb.addEventListener('updateend', () => {
+          if (queueRef.current.length > 0) {
+            const next = queueRef.current.shift()
+            if (next) sb.appendBuffer(next)
+          }
         })
-      } catch (err) {
-        console.error('WebRTC answer error:', err)
+      } catch {
+        const sb = ms.addSourceBuffer('video/webm')
+        sourceBufferRef.current = sb
+        sb.addEventListener('updateend', () => {
+          if (queueRef.current.length > 0) {
+            const next = queueRef.current.shift()
+            if (next) sb.appendBuffer(next)
+          }
+        })
       }
     }
 
-    const handleIceCandidate = (data: { streamId: string; fromSocketId: string; candidate: RTCIceCandidateInit }) => {
+    if (videoRef.current) {
+      videoRef.current.src = URL.createObjectURL(ms)
+      videoRef.current.play().catch(() => {})
+    }
+
+    socket.emit('livestream:viewer-join', { streamId: stream._id })
+
+    const timeout = setTimeout(() => {
+      setIsConnecting(prev => {
+        if (prev) {
+          setStreamEnded(true)
+          addToast('Could not connect to stream (timeout)', 'error')
+        }
+        return false
+      })
+    }, 15000)
+
+    const handleStreamChunk = (data: { streamId: string; chunk: ArrayBuffer }) => {
       if (data.streamId !== stream._id) return
-      const pc = peerConnectionRef.current
-      if (pc) {
-        pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {})
-      }
+      clearTimeout(timeout)
+      setIsConnecting(false)
+      appendBuffer(data.chunk)
     }
 
     const handleViewerCount = (data: { streamId: string; count: number }) => {
@@ -166,31 +141,15 @@ const handleOffer = async (data: { streamId: string; hostSocketId: string; offer
     const handleEnded = () => {
       setStreamEnded(true)
       setIsConnecting(false)
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close()
-        peerConnectionRef.current = null
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null
-      }
-      addToast('The stream has ended', 'info')
     }
 
     const handleHostDisconnected = () => {
       setStreamEnded(true)
       setIsConnecting(false)
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close()
-        peerConnectionRef.current = null
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null
-      }
       addToast('The host disconnected', 'warning')
     }
 
-    socket.on('livestream:offer', handleOffer)
-    socket.on('livestream:ice-candidate', handleIceCandidate)
+    socket.on('livestream:stream-chunk', handleStreamChunk)
     socket.on('livestream:viewer-count', handleViewerCount)
     socket.on('livestream:chat', handleChat)
     socket.on('livestream:like', handleLike)
@@ -198,21 +157,24 @@ const handleOffer = async (data: { streamId: string; hostSocketId: string; offer
     socket.on('livestream:host-disconnected', handleHostDisconnected)
 
     return () => {
+      clearTimeout(timeout)
       socket.emit('livestream:viewer-leave', { streamId: stream._id })
-      socket.off('livestream:offer', handleOffer)
-      socket.off('livestream:ice-candidate', handleIceCandidate)
+      socket.off('livestream:stream-chunk', handleStreamChunk)
       socket.off('livestream:viewer-count', handleViewerCount)
       socket.off('livestream:chat', handleChat)
       socket.off('livestream:like', handleLike)
       socket.off('livestream:ended', handleEnded)
       socket.off('livestream:host-disconnected', handleHostDisconnected)
 
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close()
-        peerConnectionRef.current = null
+      if (mediaSourceRef.current && mediaSourceRef.current.readyState === 'open') {
+        mediaSourceRef.current.endOfStream()
+      }
+      if (videoRef.current) {
+        videoRef.current.pause()
+        videoRef.current.src = ''
       }
     }
-  }, [socket, stream._id, setupPeerConnection, addToast])
+  }, [socket, stream._id, appendBuffer, addToast, setIsConnecting, setStreamEnded])
 
   const sendLike = useCallback(() => {
     if (!socket || hasLiked) return
@@ -258,7 +220,7 @@ const handleOffer = async (data: { streamId: string; hostSocketId: string; offer
               <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
                 className="w-12 h-12 border-[3px] border-white/20 border-t-white rounded-full mx-auto mb-3" />
               <p className="text-white/80 text-sm font-medium">Connecting to stream...</p>
-              <p className="text-white/40 text-xs mt-1">Establishing WebRTC connection</p>
+              <p className="text-white/40 text-xs mt-1">Receiving video via WebSocket</p>
             </div>
           </div>
         )}
@@ -277,57 +239,55 @@ const handleOffer = async (data: { streamId: string; hostSocketId: string; offer
         )}
 
         {!streamEnded && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="absolute top-4 left-4 flex items-center space-x-2">
-            <div className="flex items-center space-x-1.5 bg-red-500 text-white px-3 py-1.5 rounded-full shadow-lg">
-              <Radio size={14} className="animate-pulse" />
-              <span className="font-bold text-sm">LIVE</span>
-            </div>
-            <div className="flex items-center space-x-1.5 bg-black/50 text-white px-3 py-1.5 rounded-full backdrop-blur-sm">
-              <Eye size={14} />
-              <span className="font-medium text-sm">{viewerCount}</span>
-            </div>
-          </motion.div>
-        )}
-
-        {!streamEnded && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="absolute top-4 right-4">
-            <div className="flex items-center space-x-1 bg-black/50 text-white px-3 py-1.5 rounded-full backdrop-blur-sm">
-              <Heart size={14} className={`${hasLiked ? 'text-red-400' : 'text-white/60'}`} />
-              <span className="font-medium text-sm">{likeCount}</span>
-            </div>
-          </motion.div>
-        )}
-
-        {!streamEnded && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-            className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
-            <div className="flex items-center space-x-2 bg-black/40 backdrop-blur-sm rounded-xl px-3 py-2">
-              <Avatar src={stream.host.avatar} name={stream.host.username} size={28} />
-              <div className="min-w-0">
-                <span className="text-white font-medium text-sm block truncate">{stream.host.username}</span>
-                <span className="text-white/60 text-xs block truncate">{stream.title}</span>
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="absolute top-4 left-4 flex items-center space-x-2">
+              <div className="flex items-center space-x-1.5 bg-red-500 text-white px-3 py-1.5 rounded-full shadow-lg">
+                <Radio size={14} className="animate-pulse" />
+                <span className="font-bold text-sm">LIVE</span>
               </div>
-            </div>
-
-            <div className="flex space-x-2">
-              <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                onClick={sendLike}
-                disabled={hasLiked}
-                className={`p-3 rounded-full backdrop-blur-sm shadow-lg card-press ${hasLiked ? 'bg-red-500 text-white' : 'bg-white/20 text-white hover:bg-red-500/80'}`}
-                aria-label="Like stream">
-                <Heart size={18} />
-              </motion.button>
-
-              <div className="relative flex items-center bg-black/40 backdrop-blur-sm rounded-full px-2 py-2">
-                <input type="range" min="0" max="1" step="0.1" value={volume}
-                  onChange={handleVolumeChange}
-                  className="w-16 h-1 accent-white cursor-pointer"
-                  aria-label="Volume control" />
+              <div className="flex items-center space-x-1.5 bg-black/50 text-white px-3 py-1.5 rounded-full backdrop-blur-sm">
+                <Eye size={14} />
+                <span className="font-medium text-sm">{viewerCount}</span>
               </div>
-            </div>
-          </motion.div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="absolute top-4 right-4">
+              <div className="flex items-center space-x-1 bg-black/50 text-white px-3 py-1.5 rounded-full backdrop-blur-sm">
+                <Heart size={14} className={`${hasLiked ? 'text-red-400' : 'text-white/60'}`} />
+                <span className="font-medium text-sm">{likeCount}</span>
+              </div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+              className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2 bg-black/40 backdrop-blur-sm rounded-xl px-3 py-2">
+                <Avatar src={stream.host.avatar} name={stream.host.username} size={28} />
+                <div className="min-w-0">
+                  <span className="text-white font-medium text-sm block truncate">{stream.host.username}</span>
+                  <span className="text-white/60 text-xs block truncate">{stream.title}</span>
+                </div>
+              </div>
+
+              <div className="flex space-x-2">
+                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                  onClick={sendLike}
+                  disabled={hasLiked}
+                  className={`p-3 rounded-full backdrop-blur-sm shadow-lg card-press ${hasLiked ? 'bg-red-500 text-white' : 'bg-white/20 text-white hover:bg-red-500/80'}`}
+                  aria-label="Like stream">
+                  <Heart size={18} />
+                </motion.button>
+
+                <div className="relative flex items-center bg-black/40 backdrop-blur-sm rounded-full px-2 py-2">
+                  <input type="range" min="0" max="1" step="0.1" value={volume}
+                    onChange={handleVolumeChange}
+                    className="w-16 h-1 accent-white cursor-pointer"
+                    aria-label="Volume control" />
+                </div>
+              </div>
+            </motion.div>
+          </>
         )}
       </div>
 

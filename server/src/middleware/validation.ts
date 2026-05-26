@@ -72,7 +72,18 @@ export const messageValidation = [
 
 export const updateProfileValidation = [
   body('bio').optional().trim().isLength({ max: 500 }).withMessage('Bio must be at most 500 characters'),
-  body('avatar').optional().trim().isURL().withMessage('Avatar must be a valid URL'),
+  body('avatar')
+    .optional()
+    .trim()
+    .custom((value) => {
+      if (!value) return true;
+      // Allow uploaded relative paths (from POST /profile/avatar)
+      if (value.startsWith('/uploads/')) return true;
+      // Allow full URLs (legacy manual entry)
+      if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:')) return true;
+      throw new Error('Avatar must be a valid URL or an uploaded file path');
+    })
+    .withMessage('Avatar must be a valid URL or an uploaded file path'),
 ];
 
 export const followValidation = [

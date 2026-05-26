@@ -62,6 +62,20 @@ export interface User {
     messages: boolean;
     bookmarks: boolean;
   };
+  privacySettings?: {
+    postsVisibility: 'public' | 'friends' | 'private';
+    messagesFrom: 'everyone' | 'friends' | 'none';
+    storiesVisibility: 'public' | 'friends' | 'private' | 'close_friends';
+    profileVisibility: 'public' | 'friends' | 'private';
+    activityStatus: boolean;
+    dataSharing: boolean;
+  };
+  monetizationSettings?: {
+    allowAds: boolean;
+    creatorSubscriptions: boolean;
+    subscriptionPrice: number;
+    adsFrequency: 'low' | 'medium' | 'high';
+  };
   createdAt: string;
 }
 
@@ -71,6 +85,7 @@ export interface Post {
   content: string;
   image?: string;
   images?: string[];
+  video?: string;
   author: {
     _id: string;
     username: string;
@@ -383,7 +398,8 @@ export const notificationService = {
 };
 
 export const storyService = {
-  get: () => api.get('/stories'),
+  get: (page = 1, limit = 20) =>
+    api.get<{ groups: { author: { _id: string; username: string; avatar?: string }; stories: Story[] }[]; total: number; page: number; pages: number }>('/stories', { params: { page, limit } }),
   create: (data: FormData | { content: string }) => {
     if (data instanceof FormData) {
       return api.post<Story>('/stories', data, { headers: { 'Content-Type': 'multipart/form-data' } });

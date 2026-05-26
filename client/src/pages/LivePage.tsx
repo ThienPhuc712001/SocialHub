@@ -20,6 +20,7 @@ const LivePage: React.FC = () => {
   const [myStreamId, setMyStreamId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [streamHistory, setStreamHistory] = useState<LiveStreamType[]>([])
+  const [isViewerLoading, setIsViewerLoading] = useState(false)
 
   const fetchActiveStreams = useCallback(async () => {
     try {
@@ -37,6 +38,7 @@ const LivePage: React.FC = () => {
   }, [])
 
   const fetchStream = useCallback(async (id: string) => {
+    setIsViewerLoading(true)
     try {
       const res = await livestreamService.get(id)
       if (res.data.status === 'live') {
@@ -48,6 +50,8 @@ const LivePage: React.FC = () => {
     } catch {
       addToast('Stream not found', 'error')
       navigate('/live')
+    } finally {
+      setIsViewerLoading(false)
     }
   }, [addToast, navigate])
 
@@ -144,7 +148,14 @@ const LivePage: React.FC = () => {
           <LiveStreamViewer stream={currentStream} onLeave={handleLeaveViewer} />
         )}
 
-        {!isStreaming && !isViewerMode && (
+        {isViewerLoading && !isViewerMode && streamId && (
+  <div className="flex justify-center py-20">
+    <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+      className="w-10 h-10 border-[3px] border-primary/20 border-t-primary rounded-full" />
+  </div>
+)}
+
+{!isStreaming && !isViewerMode && !isViewerLoading && (
           <>
             <LiveStream onStreamStart={handleStreamStart} onStreamEnd={handleStreamEnd} />
 
