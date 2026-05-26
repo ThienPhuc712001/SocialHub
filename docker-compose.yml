@@ -1,30 +1,4 @@
-version: '3.8'
-
 services:
-  server:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
-    container_name: social-server
-    ports:
-      - "5000:5000"
-    env_file:
-      - ./server/.env
-    depends_on:
-      - mongo
-    restart: unless-stopped
-
-  client:
-    build:
-      context: ./client
-      dockerfile: Dockerfile
-    container_name: social-client
-    ports:
-      - "80:80"
-    depends_on:
-      - server
-    restart: unless-stopped
-
   mongo:
     image: mongo:6
     container_name: social-mongo
@@ -32,7 +6,58 @@ services:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+    networks:
+      - social-network
+    healthcheck:
+      test: mongosh --eval 'db.runCommand({ ping: 1 })' --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: social-server
+    ports:
+      - "5000:5000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/socialapp
+      - PORT=5000
+      - CLIENT_ORIGIN=http://localhost
+    env_file:
+      - ./server/.env
+    networks:
+      - social-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - uploads-data:/app/uploads
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_SOCKET_URL: ''
+    container_name: social-client
+    ports:
+      - "80:80"
+    networks:
+      - social-network
+    depends_on:
+      - server
+    restart: unless-stopped
+
+networks:
+  social-network:
+    driver: bridge
 
 volumes:
   mongo-data:
+  uploads-data:
