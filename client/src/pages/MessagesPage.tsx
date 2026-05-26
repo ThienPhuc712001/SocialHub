@@ -4,8 +4,11 @@ import { useAuth } from '../contexts/AuthContext'
 import { useSocket } from '../contexts/SocketContext'
 import { useToast } from '../contexts/ToastContext'
 import { messageService, conversationService, Message, ConversationUser, Conversation } from '../services/api'
-import { Send, MessageCircle, Trash2, Search, X, Users, Plus } from 'lucide-react'
+import { Send, MessageCircle, Trash2, Search, X, Users, Plus, Mic, Phone, Video, Paperclip, Image as ImageIcon, Smile, File, Download } from 'lucide-react'
 import Avatar from '../components/Avatar'
+import VoiceRecorder from '../components/VoiceRecorder'
+import StickerPicker from '../components/StickerPicker'
+import VideoCall, { IncomingCallModal } from '../components/VideoCall'
 import { ShimmerButton } from '@/components/ui/shimmer-button'
 
 const highlightText = (text: string, query: string): React.ReactNode => {
@@ -39,6 +42,10 @@ const MessagesPage: React.FC = () => {
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])
   const [availableUsers, setAvailableUsers] = useState<ConversationUser[]>([])
   const [isGroupChat, setIsGroupChat] = useState(false)
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false)
+  const [showStickerPicker, setShowStickerPicker] = useState(false)
+  const [activeVideoCall, setActiveVideoCall] = useState<{ targetUserId: string; targetUsername: string; targetAvatar?: string; callType: 'video' | 'audio' } | null>(null)
+  const [incomingCall, setIncomingCall] = useState<{ callId: string; caller: { _id: string; username: string; avatar?: string }; callType: 'video' | 'audio'; offer: RTCSessionDescriptionInit } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -115,6 +122,9 @@ const MessagesPage: React.FC = () => {
       socket.on('messageDeleted', (data: { messageId: string }) => {
         setChatMessages(prev => prev.filter(m => m._id !== data.messageId))
       })
+      socket.on('call:offer', (data: { callId: string; caller: { _id: string; username: string; avatar?: string }; callType: 'video' | 'audio'; offer: RTCSessionDescriptionInit }) => {
+        setIncomingCall(data)
+      })
       return () => {
         socket.off('newMessage')
         socket.off('onlineUsers')
@@ -122,6 +132,7 @@ const MessagesPage: React.FC = () => {
         socket.off('typing')
         socket.off('stopTyping')
         socket.off('messageDeleted')
+        socket.off('call:offer')
       }
     }
   }, [socket, selectedUser])
@@ -194,7 +205,6 @@ const MessagesPage: React.FC = () => {
     try {
       if (isGroupChat && selectedGroup) {
         await sendGroupMessage(selectedGroup._id, newMessage)
-        // Refresh group messages
         fetchGroupMessages(selectedGroup._id)
       } else if (selectedUser) {
         const response = await messageService.sendMessage(selectedUser._id, newMessage)
@@ -206,6 +216,118 @@ const MessagesPage: React.FC = () => {
     } catch {
       addToast('Failed to send message', 'error')
     }
+  }
+
+  const handleSendVoice = async (file: File) => {
+    try {
+      if (isGroupChat && selectedGroup) {
+        await conversationService.sendVoice(selectedGroup._id, file)
+        fetchGroupMessages(selectedGroup._id)
+      } else if (selectedUser) {
+        await messageService.sendVoice(selectedUser._id, file)
+        const response = await messageService.getConversation(selectedUser._id)
+        setChatMessages(response.data.messages || [])
+      }
+      setShowVoiceRecorder(false)
+      fetchConversations()
+    } catch {
+      addToast('Failed to send voice message', 'error')
+    }
+  }
+
+  const handleSendSticker = async (stickerId: string, _emoji: string) => {
+    try {
+      if (isGroupChat && selectedGroup) {
+        await conversationService.sendSticker(selectedGroup._id, stickerId)
+        fetchGroupMessages(selectedGroup._id)
+      } else if (selectedUser) {
+        await messageService.sendSticker(selectedUser._id, stickerId)
+        const response = await messageService.getConversation(selectedUser._id)
+        setChatMessages(response.data.messages || [])
+      }
+      setShowStickerPicker(false)
+      fetchConversations()
+    } catch {
+      addToast('Failed to send sticker', 'error')
+    }
+  }
+
+  const handleSendFile = async (file: File) => {
+    try {
+      if (isGroupChat && selectedGroup) {
+        await conversationService.sendFile(selectedGroup._id, file)
+        fetchGroupMessages(selectedGroup._id)
+      } else if (selectedUser) {
+        await messageService.sendFile(selectedUser._id, file)
+        const response = await messageService.getConversation(selectedUser._id)
+        setChatMessages(response.data.messages || [])
+      }
+      addToast('File sent!', 'success')
+      fetchConversations()
+    } catch {
+      addToast('Failed to send file', 'error')
+    }
+  }
+
+  const handleSendImage = async (file: File) => {
+    try {
+      if (isGroupChat && selectedGroup) {
+        await conversationService.sendImage(selectedGroup._id, file)
+        fetchGroupMessages(selectedGroup._id)
+      } else if (selectedUser) {
+        await messageService.sendImage(selectedUser._id, file)
+        const response = await messageService.getConversation(selectedUser._id)
+        setChatMessages(response.data.messages || [])
+      }
+      addToast('Image sent!', 'success')
+      fetchConversations()
+    } catch {
+      addToast('Failed to send image', 'error')
+    }
+  }
+
+  const initiateCall = (callType: 'video' | 'audio') => {
+    if (!selectedUser) return
+    setActiveVideoCall({
+      targetUserId: selectedUser._id,
+      targetUsername: selectedUser.username,
+      targetAvatar: selectedUser.avatar,
+      callType
+    })
+  }
+
+  const rejectIncomingCall = () => {
+    if (socket && incomingCall) {
+      socket.emit('call:reject', { to: incomingCall.caller._id, callId: incomingCall.callId })
+    }
+    setIncomingCall(null)
+  }
+
+  const acceptIncomingCall = () => {
+    if (!incomingCall) return
+    setActiveVideoCall({
+      targetUserId: incomingCall.caller._id,
+      targetUsername: incomingCall.caller.username,
+      targetAvatar: incomingCall.caller.avatar,
+      callType: incomingCall.callType
+    })
+    setIncomingCall(null)
+  }
+
+  const getFileIconColor = (fileType?: string) => {
+    if (!fileType) return 'text-text-muted'
+    if (fileType.includes('pdf')) return 'text-red-400'
+    if (fileType.includes('word') || fileType.includes('doc')) return 'text-blue-400'
+    if (fileType.includes('excel') || fileType.includes('sheet') || fileType.includes('xls')) return 'text-green-400'
+    if (fileType.includes('powerpoint') || fileType.includes('ppt')) return 'text-orange-400'
+    return 'text-text-muted'
+  }
+
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes) return ''
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
   const handleDeleteMessage = async (messageId: string) => {
@@ -406,6 +528,14 @@ const MessagesPage: React.FC = () => {
                   className={`p-2 rounded-lg transition-all card-press ${showSearch ? 'bg-primary/15 text-primary glow-sm' : 'text-text-muted hover:text-text hover:bg-surface/40'}`}>
                   <Search size={18} />
                 </motion.button>
+                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => initiateCall('audio')}
+                  className="p-2 rounded-lg text-text-muted hover:text-text hover:bg-surface/40 transition-all card-press">
+                  <Phone size={18} />
+                </motion.button>
+                <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => initiateCall('video')}
+                  className="p-2 rounded-lg text-text-muted hover:text-text hover:bg-surface/40 transition-all card-press">
+                  <Video size={18} />
+                </motion.button>
               </div>
             </div>
 
@@ -425,7 +555,39 @@ const MessagesPage: React.FC = () => {
                       ? 'bg-gradient-to-r from-primary to-accent text-white shadow-[0_4px_20px_rgba(139,92,246,0.25)] rounded-2xl rounded-br-md'
                       : 'glass-card rounded-2xl rounded-bl-md text-text'
                   }`}>
-                    <p className="text-sm leading-relaxed">{isSearchActive ? highlightText(msg.content, searchQuery) : msg.content}</p>
+                    {msg.messageType === 'voice' && msg.audioUrl && (
+                      <div className="flex items-center space-x-2">
+                        <audio controls className="w-full max-w-[200px]" preload="metadata">
+                          <source src={msg.audioUrl.startsWith('/') ? `${import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000'}${msg.audioUrl}` : msg.audioUrl} type="audio/webm" />
+                        </audio>
+                      </div>
+                    )}
+                    {msg.messageType === 'sticker' && msg.stickerId && (
+                      <div className="text-4xl text-center py-2">
+                        {msg.stickerId}
+                      </div>
+                    )}
+                    {msg.messageType === 'image' && msg.imageUrl && (
+                      <div className="rounded-lg overflow-hidden">
+                        <img src={msg.imageUrl.startsWith('/') ? `${import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000'}${msg.imageUrl}` : msg.imageUrl}
+                          alt="Shared image" className="max-w-full max-h-[200px] object-cover rounded-lg cursor-pointer" loading="lazy" />
+                      </div>
+                    )}
+                    {msg.messageType === 'file' && msg.fileUrl && (
+                      <a href={msg.fileUrl.startsWith('/') ? `${import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000'}${msg.fileUrl}` : msg.fileUrl}
+                        target="_blank" rel="noopener noreferrer"
+                        className={`flex items-center space-x-2 p-2 rounded-lg ${msg.sender._id === user?._id ? 'bg-white/10' : 'bg-surface/40'}`}>
+                        <File size={20} className={getFileIconColor(msg.fileType)} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate font-medium">{msg.fileName || 'File'}</p>
+                          {msg.fileSize && <p className="text-xs opacity-60">{formatFileSize(msg.fileSize)}</p>}
+                        </div>
+                        <Download size={16} className="opacity-60" />
+                      </a>
+                    )}
+                    {(msg.messageType === 'text' || !msg.messageType) && (
+                      <p className="text-sm leading-relaxed">{isSearchActive ? highlightText(msg.content, searchQuery) : msg.content}</p>
+                    )}
                     <div className="flex items-center space-x-1 mt-1">
                       <span className={`text-xs ${msg.sender._id === user?._id ? 'text-white/50' : 'text-text-subtle'}`}>
                         {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -475,17 +637,40 @@ const MessagesPage: React.FC = () => {
             </div>
 
             {!isSearchActive && (
-              <div className="p-3 border-t border-border/20 flex space-x-2">
-                <input type="text" placeholder="Type a message..." value={newMessage} onChange={(e) => { setNewMessage(e.target.value); handleTyping(); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
-                  className="flex-1 px-4 py-2.5 input-glass rounded-xl text-text placeholder-text-muted" />
-                <ShimmerButton onClick={sendMessage}
-                  className="px-4 py-2.5"
-                  background="rgba(139, 92, 246, 1)"
-                  shimmerColor="#a78bfa"
-                  shimmerDuration="2s">
-                  <Send size={18} />
-                </ShimmerButton>
+              <div className="p-3 border-t border-border/20">
+                {showVoiceRecorder && (
+                  <VoiceRecorder onSend={handleSendVoice} onCancel={() => setShowVoiceRecorder(false)} />
+                )}
+                {!showVoiceRecorder && (
+                  <div className="flex items-center space-x-2">
+                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => setShowStickerPicker(true)}
+                      className="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-all card-press">
+                      <Smile size={18} />
+                    </motion.button>
+                    <label className="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-all card-press cursor-pointer">
+                      <ImageIcon size={18} />
+                      <input type="file" accept="image/*" onChange={e => { if (e.target.files?.[0]) handleSendImage(e.target.files[0]) }} className="hidden" />
+                    </label>
+                    <label className="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-all card-press cursor-pointer">
+                      <Paperclip size={18} />
+                      <input type="file" onChange={e => { if (e.target.files?.[0]) handleSendFile(e.target.files[0]) }} className="hidden" />
+                    </label>
+                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => setShowVoiceRecorder(true)}
+                      className="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-all card-press">
+                      <Mic size={18} />
+                    </motion.button>
+                    <input type="text" placeholder="Type a message..." value={newMessage} onChange={(e) => { setNewMessage(e.target.value); handleTyping(); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
+                      className="flex-1 px-4 py-2.5 input-glass rounded-xl text-text placeholder-text-muted" />
+                    <ShimmerButton onClick={sendMessage}
+                      className="px-4 py-2.5"
+                      background="rgba(139, 92, 246, 1)"
+                      shimmerColor="#a78bfa"
+                      shimmerDuration="2s">
+                      <Send size={18} />
+                    </ShimmerButton>
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -502,7 +687,7 @@ const MessagesPage: React.FC = () => {
         )}
       </div>
 
-      {/* Create Group Modal */}
+{/* Create Group Modal */}
       <AnimatePresence>
         {showCreateGroup && (
           <motion.div
@@ -568,7 +753,7 @@ const MessagesPage: React.FC = () => {
                           <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
                             selectedMembers.includes(user._id) ? 'bg-primary border-primary' : 'border-border'
                           }`}>
-                            {selectedMembers.includes(user._id) && <span className="text-white text-xs">✓</span>}
+                            {selectedMembers.includes(user._id) && <span className="text-white text-xs">&#10003;</span>}
                           </div>
                           <Avatar src={user.avatar} name={user.username} size={36} />
                           <span className="text-text font-medium">{user.username}</span>
@@ -609,6 +794,34 @@ const MessagesPage: React.FC = () => {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showStickerPicker && (
+          <StickerPicker onSelect={handleSendSticker} onClose={() => setShowStickerPicker(false)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {activeVideoCall && (
+          <VideoCall
+            targetUserId={activeVideoCall.targetUserId}
+            targetUsername={activeVideoCall.targetUsername}
+            targetAvatar={activeVideoCall.targetAvatar}
+            callType={activeVideoCall.callType}
+            onEnd={() => setActiveVideoCall(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {incomingCall && (
+          <IncomingCallModal
+            callData={incomingCall}
+            onAccept={acceptIncomingCall}
+            onReject={rejectIncomingCall}
+          />
         )}
       </AnimatePresence>
     </motion.div>

@@ -3,7 +3,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface INotification extends Document {
   recipient: mongoose.Types.ObjectId;
   sender: mongoose.Types.ObjectId;
-  type: 'like' | 'comment' | 'follow' | 'message' | 'bookmark';
+  type: 'like' | 'comment' | 'follow' | 'message' | 'bookmark' | 'mention';
   post?: mongoose.Types.ObjectId;
   content?: string;
   read: boolean;
@@ -13,7 +13,7 @@ export interface INotification extends Document {
 const notificationSchema = new Schema<INotification>({
   recipient: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   sender: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-  type: { type: String, enum: ['like', 'comment', 'follow', 'message', 'bookmark'], required: true },
+  type: { type: String, enum: ['like', 'comment', 'follow', 'message', 'bookmark', 'mention'], required: true },
   post: { type: Schema.Types.ObjectId, ref: 'Post' },
   content: { type: String },
   read: { type: Boolean, default: false },

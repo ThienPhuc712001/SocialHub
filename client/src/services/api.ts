@@ -123,6 +123,9 @@ export interface Post {
     expiresAt?: string;
     totalVotes?: number;
   };
+  location?: { name: string; coordinates: [number, number] };
+  status?: 'draft' | 'published' | 'scheduled';
+  scheduledAt?: string;
   verified?: boolean;
   editedAt?: string;
   pinned: boolean;
@@ -171,6 +174,14 @@ export interface Message {
     avatar?: string;
   };
   content: string;
+  messageType?: 'text' | 'voice' | 'sticker' | 'file' | 'image' | 'post_share';
+  audioUrl?: string;
+  stickerId?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileType?: string;
+  imageUrl?: string;
   read: boolean;
   createdAt: string;
 }
@@ -191,7 +202,7 @@ export interface Notification {
     username: string;
     avatar?: string;
   };
-  type: 'like' | 'comment' | 'follow' | 'message' | 'bookmark' | 'repost';
+  type: 'like' | 'comment' | 'follow' | 'message' | 'bookmark' | 'repost' | 'mention';
   post?: {
     _id: string;
     title?: string;
@@ -212,6 +223,7 @@ export interface Story {
   image?: string;
   content?: string;
   viewers: string[];
+  replies?: { _id: string; sender: { _id: string; username: string; avatar?: string }; content: string; createdAt: string }[];
   createdAt: string;
   expiresAt: string;
 }
@@ -241,6 +253,38 @@ export interface HashtagFollow {
   _id: string;
   user: string;
   hashtag: string;
+  createdAt: string;
+}
+
+export interface Album {
+  _id: string;
+  title: string;
+  description?: string;
+  coverImage?: string;
+  images: string[];
+  author: { _id: string; username: string; avatar?: string };
+  createdAt: string;
+}
+
+export interface VideoCall {
+  _id: string;
+  caller: User;
+  receiver: User;
+  callType: 'video' | 'audio';
+  status: 'missed' | 'completed' | 'rejected';
+  duration?: number;
+  startedAt: string;
+  endedAt?: string;
+  createdAt: string;
+}
+
+export interface StickerPack {
+  _id: string;
+  name: string;
+  description?: string;
+  stickers: { id: string; name: string; url: string; emoji: string }[];
+  author?: string;
+  isDefault?: boolean;
   createdAt: string;
 }
 
@@ -332,6 +376,11 @@ export const posts = {
     api.post(`/posts/${id}/share-to-chat`, { targetUserId }),
   getReels: (page = 1, limit = 10) =>
     api.get<PaginatedResponse<Post>>('/posts/reels', { params: { page, limit } }),
+  getDrafts: (page = 1, limit = 10) => api.get<PaginatedResponse<Post>>('/posts/drafts', { params: { page, limit } }),
+  publishDraft: (id: string) => api.put(`/posts/${id}/publish`),
+  schedulePost: (id: string, scheduledAt: string) => api.put(`/posts/${id}/schedule`, { scheduledAt }),
+  getNearby: (latitude: number, longitude: number, radius?: number) =>
+    api.get<PaginatedResponse<Post>>('/posts/nearby', { params: { latitude, longitude, radius } }),
 };
 
 export const profiles = {
@@ -374,6 +423,7 @@ export const profiles = {
   updatePrivacySettings: (settings: any) => api.put<User>('/profile/privacy-settings', settings),
   updateMonetizationSettings: (settings: any) => api.put<User>('/profile/monetization-settings', settings),
   getAnalytics: (timeRange: string) => api.get(`/profile/analytics?timeRange=${timeRange}`),
+  searchMention: (q: string) => api.get<User[]>('/profile/search-mention', { params: { q } }),
   updateFormData: (formData: FormData) => api.put<User>('/profile', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };
 
@@ -387,6 +437,26 @@ export const messageService = {
     api.delete(`/messages/${userId}/messages/${messageId}`),
   searchMessages: (userId: string, query: string) =>
     api.get<{ messages: Message[] }>(`/messages/search/${userId}`, { params: { q: query } }),
+  sendVoice: (userId: string, file: File) => {
+    const fd = new FormData();
+    fd.append('audio', file);
+    fd.append('messageType', 'voice');
+    return api.post(`/messages/${userId}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  sendSticker: (userId: string, stickerId: string) =>
+    api.post(`/messages/${userId}`, { messageType: 'sticker', stickerId }),
+  sendFile: (userId: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('messageType', 'file');
+    return api.post(`/messages/${userId}/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  sendImage: (userId: string, file: File) => {
+    const fd = new FormData();
+    fd.append('image', file);
+    fd.append('messageType', 'image');
+    return api.post(`/messages/${userId}/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
 };
 
 export const notificationService = {
@@ -410,6 +480,8 @@ export const storyService = {
   delete: (id: string) => api.delete(`/stories/${id}`),
   view: (id: string) => api.post<{ viewerCount: number; viewers: User[] }>(`/stories/${id}/view`),
   getViewers: (id: string) => api.get<{ viewerCount: number; viewers: User[] }>(`/stories/${id}/viewers`),
+  reply: (id: string, content: string) => api.post(`/stories/${id}/reply`, { content }),
+  getReplies: (id: string) => api.get(`/stories/${id}/replies`),
 };
 
 export const conversationService = {
@@ -427,6 +499,26 @@ export const conversationService = {
     api.get<PaginatedResponse<Message>>(`/conversations/${id}/messages`, { params: { page, limit } }),
   sendMessage: (id: string, content: string) =>
     api.post<Message>(`/conversations/${id}/messages`, { content }),
+  sendVoice: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append('audio', file);
+    fd.append('messageType', 'voice');
+    return api.post(`/conversations/${id}/messages`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  sendSticker: (id: string, stickerId: string) =>
+    api.post(`/conversations/${id}/messages`, { messageType: 'sticker', stickerId }),
+  sendFile: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('messageType', 'file');
+    return api.post(`/conversations/${id}/messages/file`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  sendImage: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append('image', file);
+    fd.append('messageType', 'image');
+    return api.post(`/conversations/${id}/messages/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
 };
 
 export const hashtagService = {
@@ -516,6 +608,31 @@ export const livestreamService = {
   end: (id: string) => api.put<LiveStreamType>(`/livestreams/${id}/end`),
   like: (id: string) => api.put<{ likeCount: number }>(`/livestreams/${id}/like`),
   getHistory: () => api.get<LiveStreamType[]>('/livestreams/history'),
+};
+
+export const albumService = {
+  list: (userId?: string) => api.get<{ albums: Album[]; total: number; page: number; pages: number }>('/albums', { params: userId ? { userId } : {} }),
+  create: (data: { title: string; description?: string; coverImage?: string; images?: string[] }) => api.post<Album>('/albums', data),
+  get: (id: string) => api.get<Album>(`/albums/${id}`),
+  update: (id: string, data: { title?: string; description?: string; coverImage?: string }) => api.put<Album>(`/albums/${id}`, data),
+  delete: (id: string) => api.delete(`/albums/${id}`),
+  addImages: (id: string, images: string[]) => api.post<Album>(`/albums/${id}/images`, { images }),
+  removeImage: (id: string, imageIndex: number) => api.delete(`/albums/${id}/images/${imageIndex}`),
+};
+
+export const videocallService = {
+  getHistory: (page = 1, limit = 20) => api.get<{ calls: VideoCall[]; total: number; page: number; pages: number }>('/videocalls/history', { params: { page, limit } }),
+};
+
+export const chatbotService = {
+  sendMessage: (message: string) => api.post<{ message: string; timestamp: string }>('/chatbot/message', { message }),
+  clearHistory: () => api.post<{ message: string }>('/chatbot/clear'),
+};
+
+export const stickerService = {
+  getPacks: () => api.get<StickerPack[]>('/stickers/packs'),
+  getPack: (id: string) => api.get<StickerPack>(`/stickers/packs/${id}`),
+  createPack: (name: string, description?: string, stickers?: any[]) => api.post<StickerPack>('/stickers/packs', { name, description, stickers }),
 };
 
 export default api;

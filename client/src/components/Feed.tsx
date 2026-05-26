@@ -5,7 +5,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useSocket } from '../contexts/SocketContext'
 import { useToast } from '../contexts/ToastContext'
 import Post from './Post'
-import { X, ImagePlus, Users } from 'lucide-react'
+import MentionInput from './MentionInput'
+import { X, ImagePlus, Users, MapPin, Clock, FileEdit } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { PostSkeleton } from '../components/ui/skeleton'
@@ -33,6 +34,12 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
   const [videoPreview, setVideoPreview] = useState<string | null>(null)
   const [compressingImage, setCompressingImage] = useState(false)
   const [compressingVideo, setCompressingVideo] = useState(false)
+  const [locationName, setLocationName] = useState('')
+  const [latitude, setLatitude] = useState<number | null>(null)
+  const [longitude, setLongitude] = useState<number | null>(null)
+  const [postStatus, setPostStatus] = useState<'published' | 'draft' | 'scheduled'>('published')
+  const [scheduledDate, setScheduledDate] = useState('')
+  const [scheduledTime, setScheduledTime] = useState('')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [sort, setSort] = useState<'latest' | 'popular'>('latest')
@@ -143,6 +150,12 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
       setVideoPreview(null)
       setCompressingImage(false)
       setCompressingVideo(false)
+      setLocationName('')
+      setLatitude(null)
+      setLongitude(null)
+      setPostStatus('published')
+      setScheduledDate('')
+      setScheduledTime('')
     }
   }, [showCreateModal])
 
@@ -213,7 +226,19 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
 
   const handleCreatePost = async () => {
     try {
-      let data: FormData | { title: string; content: string } = { title: title || '', content }
+      let data: FormData | { title: string; content: string; status?: string; scheduledAt?: string; locationName?: string; latitude?: number; longitude?: number } = { title: title || '', content }
+
+      if (postStatus !== 'published') {
+        data = { ...data, status: postStatus }
+      }
+
+      if (postStatus === 'scheduled' && scheduledDate && scheduledTime) {
+        data = { ...data, scheduledAt: new Date(`${scheduledDate}T${scheduledTime}`).toISOString() }
+      }
+
+      if (locationName) {
+        data = { ...data, locationName, latitude: latitude || undefined, longitude: longitude || undefined }
+      }
 
       if (image || video) {
         const formData = new FormData()
@@ -221,11 +246,19 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
         formData.append('content', content)
         if (image) formData.append('image', image)
         if (video) formData.append('video', video)
+        if (postStatus !== 'published') formData.append('status', postStatus)
+        if (postStatus === 'scheduled' && scheduledDate && scheduledTime) formData.append('scheduledAt', new Date(`${scheduledDate}T${scheduledTime}`).toISOString())
+        if (locationName) {
+          formData.append('locationName', locationName)
+          if (latitude) formData.append('latitude', latitude.toString())
+          if (longitude) formData.append('longitude', longitude.toString())
+        }
         data = formData
       }
 
       await posts.create(data)
-      addToast(video ? 'Reel created!' : 'Post created!', 'success')
+      const msg = postStatus === 'draft' ? 'Draft saved!' : postStatus === 'scheduled' ? 'Post scheduled!' : (video ? 'Reel created!' : 'Post created!')
+      addToast(msg, 'success')
       onCloseCreateModal()
       setPage(1)
       fetchPosts(1, sort)
@@ -328,8 +361,33 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
               <div className="space-y-3">
                 <input type="text" placeholder="Post title (optional)" value={title} onChange={(e) => setTitle(e.target.value)}
                   className="w-full px-4 py-3 input-glass rounded-xl text-text placeholder-text-muted" />
-                <textarea placeholder="What's on your mind?" value={content} onChange={(e) => setContent(e.target.value)} rows={4} required
-                  className="w-full px-4 py-3 input-glass rounded-xl text-text placeholder-text-muted resize-none" />
+                <MentionInput value={content} onChange={setContent} placeholder="What's on your mind?" rows={4} />
+                <div className="flex items-center space-x-2 mt-1">
+                  <div className="flex-1 flex items-center space-x-2">
+                    <MapPin size={16} className="text-text-muted" />
+                    <input type="text" placeholder="Location (optional)" value={locationName} onChange={e => setLocationName(e.target.value)}
+                      className="flex-1 px-3 py-2 input-glass rounded-lg text-text placeholder-text-muted text-sm" />
+                  </div>
+                  <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                          (pos) => {
+                            setLatitude(pos.coords.latitude)
+                            setLongitude(pos.coords.longitude)
+                            if (!locationName) setLocationName(`${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`)
+                            addToast('Location detected!', 'success')
+                          },
+                          () => addToast('Failed to get location', 'error')
+                        )
+                      } else {
+                        addToast('Geolocation not supported', 'error')
+                      }
+                    }}
+                    className="px-3 py-2 glass-card text-primary rounded-lg text-xs card-press">
+                    Use current
+                  </motion.button>
+                </div>
                 {imagePreview && (
                   <div className="relative rounded-xl overflow-hidden">
                     <img src={imagePreview} alt="Image preview" className="w-full h-48 object-cover" />
@@ -359,14 +417,34 @@ const Feed: React.FC<Props> = ({ showCreateModal, onCloseCreateModal }) => {
                   </div>
                 )}
               </div>
-              <div className="flex justify-end space-x-3 mt-4">
-                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={onCloseCreateModal}
-                  className="px-5 py-2.5 text-text-muted rounded-xl font-medium card-press">Cancel</motion.button>
-                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={handleCreatePost} disabled={!content.trim() || compressingImage || compressingVideo}
-                  className="px-5 py-2.5 bg-gradient-to-r from-primary to-accent text-white rounded-xl font-medium shadow-glow-sm disabled:opacity-50 card-press">
-                  {compressingImage ? 'Compressing image...' : compressingVideo ? 'Processing video...' : video ? 'Create Reel' : 'Post'}
-                </motion.button>
+              <div className="flex justify-between space-x-2 mt-4">
+                <div className="flex space-x-2">
+                  <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setPostStatus('draft')}
+                    className={`flex items-center space-x-1 px-3 py-2.5 rounded-xl font-medium text-sm card-press ${postStatus === 'draft' ? 'bg-primary/15 text-primary border border-primary/30' : 'glass-card text-text-muted'}`}>
+                    <FileEdit size={14} /> <span>Draft</span>
+                  </motion.button>
+                  <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setPostStatus('scheduled')}
+                    className={`flex items-center space-x-1 px-3 py-2.5 rounded-xl font-medium text-sm card-press ${postStatus === 'scheduled' ? 'bg-primary/15 text-primary border border-primary/30' : 'glass-card text-text-muted'}`}>
+                    <Clock size={14} /> <span>Schedule</span>
+                  </motion.button>
+                </div>
+                <div className="flex space-x-2">
+                  <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={onCloseCreateModal}
+                    className="px-4 py-2.5 text-text-muted rounded-xl font-medium card-press">Cancel</motion.button>
+                  <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={handleCreatePost} disabled={!content.trim() || compressingImage || compressingVideo || (postStatus === 'scheduled' && (!scheduledDate || !scheduledTime))}
+                    className="px-5 py-2.5 bg-gradient-to-r from-primary to-accent text-white rounded-xl font-medium shadow-glow-sm disabled:opacity-50 card-press">
+                    {compressingImage ? 'Compressing image...' : compressingVideo ? 'Processing video...' : postStatus === 'draft' ? 'Save Draft' : postStatus === 'scheduled' ? 'Schedule' : (video ? 'Create Reel' : 'Post')}
+                  </motion.button>
+                </div>
               </div>
+              {postStatus === 'scheduled' && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mt-3 flex space-x-2">
+                  <input type="date" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)}
+                    className="flex-1 px-3 py-2 input-glass rounded-lg text-text text-sm" />
+                  <input type="time" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)}
+                    className="flex-1 px-3 py-2 input-glass rounded-lg text-text text-sm" />
+                </motion.div>
+              )}
             </motion.div>
           </motion.div>
         )}

@@ -2,6 +2,7 @@ import express, { Response } from 'express';
 import mongoose from 'mongoose';
 import Story from '../models/Story';
 import User from '../models/User';
+import Notification from '../models/Notification';
 import authMiddleware, { AuthRequest } from '../middleware/auth';
 import { storyUpload } from '../middleware/upload';
 import { storyValidation } from '../middleware/validation';
@@ -19,6 +20,7 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     const stories = await Story.find()
       .populate('author', 'username avatar')
       .populate('viewers', 'username avatar')
+      .populate('replies.sender', 'username avatar')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -88,6 +90,51 @@ router.get('/:id/viewers', authMiddleware, async (req: AuthRequest, res: Respons
 
     const viewers = await User.find({ _id: { $in: story.viewers } }).select('username avatar');
     res.json({ viewerCount: story.viewers.length, viewers });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.post('/:id/reply', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const storyId = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(storyId)) return res.status(400).json({ message: 'Invalid story ID' });
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ message: 'Reply content is required' });
+
+    const story = await Story.findById(storyId);
+    if (!story) return res.status(404).json({ message: 'Story not found' });
+
+    const userId = new mongoose.Types.ObjectId(req.user!.id);
+    (story.replies as any).push({ sender: userId, content: content.trim() });
+    await story.save();
+    await story.populate('replies.sender', 'username avatar');
+
+    if (story.author.toString() !== req.user!.id) {
+      await Notification.create({
+        recipient: story.author,
+        sender: userId,
+        type: 'comment',
+        content: `Replied to your story: ${content.trim().substring(0, 50)}`,
+      });
+      const io = req.app.get('io');
+      io.to(story.author.toString()).emit('notification', { type: 'comment', senderId: req.user!.id });
+      io.to(story.author.toString()).emit('storyReply', { storyId, senderId: req.user!.id, content: content.trim() });
+    }
+
+    res.status(201).json(story.replies[story.replies.length - 1]);
+  } catch (error: any) {
+    res.status(400).json({ message: 'Failed to reply to story' });
+  }
+});
+
+router.get('/:id/replies', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const storyId = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(storyId)) return res.status(400).json({ message: 'Invalid story ID' });
+    const story = await Story.findById(storyId).populate('replies.sender', 'username avatar');
+    if (!story) return res.status(404).json({ message: 'Story not found' });
+    res.json({ replies: story.replies });
   } catch (error: any) {
     res.status(500).json({ message: 'Internal server error' });
   }

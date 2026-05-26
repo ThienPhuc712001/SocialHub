@@ -21,7 +21,13 @@ import hashtagRoutes from './routes/hashtags';
 import highlightRoutes from './routes/highlights';
 import adminRoutes from './routes/admin';
 import livestreamRoutes from './routes/livestreams';
+import albumRoutes from './routes/albums';
+import stickerRoutes from './routes/stickers';
+import videocallRoutes from './routes/videocalls';
+import chatbotRoutes from './routes/chatbot';
 import LiveStream from './models/LiveStream';
+import Post from './models/Post';
+import StickerPack from './models/StickerPack';
 import User from './models/User';
 import { adminMiddleware } from './middleware/auth';
 import errorHandler from './middleware/errorHandler';
@@ -38,7 +44,6 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
-// Ensure uploads directory exists (prevents 500 on avatar/cover/post uploads)
 const uploadsDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -99,12 +104,76 @@ app.use('/api/conversations', apiLimiter, conversationRoutes);
 app.use('/api/hashtags', apiLimiter, hashtagRoutes);
 app.use('/api/highlights', apiLimiter, highlightRoutes);
 app.use('/api/livestreams', apiLimiter, livestreamRoutes);
+app.use('/api/albums', apiLimiter, albumRoutes);
+app.use('/api/stickers', apiLimiter, stickerRoutes);
+app.use('/api/videocalls', apiLimiter, videocallRoutes);
+app.use('/api/chatbot', apiLimiter, chatbotRoutes);
 app.use('/api/admin', apiLimiter, adminMiddleware, adminRoutes);
 app.use(errorHandler);
 
 mongoose.connect(process.env.MONGO_URI as string)
-  .then(() => console.log('MongoDB connected'))
+  .then(() => {
+    console.log('MongoDB connected');
+    seedDefaultStickerPacks();
+  })
   .catch(err => { console.error(err); process.exit(1); });
+
+const seedDefaultStickerPacks = async () => {
+  const count = await StickerPack.countDocuments({ isDefault: true });
+  if (count > 0) return;
+
+  const defaultPacks = [
+    {
+      name: 'Smileys', description: 'Classic smiley faces', isDefault: true,
+      stickers: [
+        { id: 'smile', name: 'Smile', emoji: '😀', url: '' },
+        { id: 'laugh', name: 'Laugh', emoji: '😂', url: '' },
+        { id: 'wink', name: 'Wink', emoji: '😉', url: '' },
+        { id: 'love', name: 'Love', emoji: '😍', url: '' },
+        { id: 'cool', name: 'Cool', emoji: '😎', url: '' },
+        { id: 'think', name: 'Think', emoji: '🤔', url: '' },
+        { id: 'cry', name: 'Cry', emoji: '😢', url: '' },
+        { id: 'angry', name: 'Angry', emoji: '😡', url: '' },
+      ],
+    },
+    {
+      name: 'Animals', description: 'Cute animal stickers', isDefault: true,
+      stickers: [
+        { id: 'dog', name: 'Dog', emoji: '🐶', url: '' },
+        { id: 'cat', name: 'Cat', emoji: '🐱', url: '' },
+        { id: 'bear', name: 'Bear', emoji: '🐻', url: '' },
+        { id: 'rabbit', name: 'Rabbit', emoji: '🐰', url: '' },
+        { id: 'panda', name: 'Panda', emoji: '🐼', url: '' },
+        { id: 'unicorn', name: 'Unicorn', emoji: '🦄', url: '' },
+      ],
+    },
+    {
+      name: 'Gestures', description: 'Hand gestures and actions', isDefault: true,
+      stickers: [
+        { id: 'thumbsup', name: 'Thumbs Up', emoji: '👍', url: '' },
+        { id: 'thumbsdown', name: 'Thumbs Down', emoji: '👎', url: '' },
+        { id: 'clap', name: 'Clap', emoji: '👏', url: '' },
+        { id: 'wave', name: 'Wave', emoji: '👋', url: '' },
+        { id: 'fist', name: 'Fist', emoji: '✊', url: '' },
+        { id: 'heart', name: 'Heart', emoji: '❤️', url: '' },
+      ],
+    },
+    {
+      name: 'Food', description: 'Food and drinks', isDefault: true,
+      stickers: [
+        { id: 'pizza', name: 'Pizza', emoji: '🍕', url: '' },
+        { id: 'coffee', name: 'Coffee', emoji: '☕', url: '' },
+        { id: 'cake', name: 'Cake', emoji: '🎂', url: '' },
+        { id: 'burger', name: 'Burger', emoji: '🍔', url: '' },
+        { id: 'beer', name: 'Beer', emoji: '🍺', url: '' },
+        { id: 'icecream', name: 'Ice Cream', emoji: '🍦', url: '' },
+      ],
+    },
+  ];
+
+  await StickerPack.insertMany(defaultPacks);
+  console.log('Default sticker packs seeded');
+};
 
 const server = http.createServer(app);
 
@@ -148,6 +217,30 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('stopTyping', (data: { to: string }) => {
     io.to(data.to).emit('stopTyping', { from: userId });
+  });
+
+  socket.on('call:offer', (data: { to: string; offer: any; callType: string }) => {
+    io.to(data.to).emit('call:offer', { from: userId, offer: data.offer, callType: data.callType });
+  });
+
+  socket.on('call:answer', (data: { to: string; answer: any }) => {
+    io.to(data.to).emit('call:answer', { from: userId, answer: data.answer });
+  });
+
+  socket.on('call:ice-candidate', (data: { to: string; candidate: any }) => {
+    io.to(data.to).emit('call:ice-candidate', { from: userId, candidate: data.candidate });
+  });
+
+  socket.on('call:start', (data: { to: string; callType: string }) => {
+    io.to(data.to).emit('call:start', { from: userId, callType: data.callType });
+  });
+
+  socket.on('call:end', (data: { to: string }) => {
+    io.to(data.to).emit('call:end', { from: userId });
+  });
+
+  socket.on('call:reject', (data: { to: string }) => {
+    io.to(data.to).emit('call:reject', { from: userId });
   });
 
   socket.on('livestream:host-join', async (data: { streamId: string }) => {
@@ -298,8 +391,24 @@ io.on('connection', (socket: Socket) => {
 
 app.set('io', io);
 
+const scheduleInterval = setInterval(async () => {
+  try {
+    const now = new Date();
+    const scheduledPosts = await Post.find({ status: 'scheduled', scheduledAt: { $lte: now } });
+    for (const post of scheduledPosts) {
+      post.status = 'published';
+      await post.save();
+      await post.populate('author', 'username avatar');
+      io.emit('newPost', post);
+    }
+  } catch (err) {
+    console.error('Scheduled post check error:', err);
+  }
+}, 60000);
+
 const gracefulShutdown = () => {
   console.log('Shutting down gracefully...');
+  clearInterval(scheduleInterval);
   server.close();
   mongoose.connection.close();
   process.exit(0);

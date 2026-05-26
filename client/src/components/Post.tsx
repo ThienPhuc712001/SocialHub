@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { Heart, MessageCircle, Share2, Send, Trash2, Edit3, Bookmark, BookmarkCheck, Flag, Pin, ThumbsUp } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Heart, MessageCircle, Share2, Send, Trash2, Edit3, Bookmark, BookmarkCheck, Flag, Pin, ThumbsUp, MapPin } from 'lucide-react'
+import { useNavigate, Link } from 'react-router-dom'
 import { Post as PostType, posts, Comment, reportService, messageService } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
@@ -10,8 +10,28 @@ import { formatRelativeTime, getErrorMessage } from '../utils/format'
 import { getSocialAriaLabels } from '../utils/accessibility'
 import Avatar from './Avatar'
 import VideoPost from './VideoPost'
+import ShareModal from './ShareModal'
 import { Sparkles } from '@/components/ui/sparkles'
 import { useFocusTrap } from '../hooks/useFocusTrap'
+
+const renderMentions = (content: string): React.ReactNode => {
+  const parts = content.split(/(@\w+)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('@')) {
+      const username = part.slice(1)
+      return (
+        <Link
+          key={i}
+          to={`/profile/${username}`}
+          className="text-primary hover:text-accent transition-colors font-medium"
+        >
+          {part}
+        </Link>
+      )
+    }
+    return part
+  })
+}
 
 interface PostProps {
   post: PostType
@@ -49,6 +69,7 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
   const [showReportModal, setShowReportModal] = useState(false)
   const [reportReason, setReportReason] = useState('')
   const [showShareChatModal, setShowShareChatModal] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
   const [conversations, setConversations] = useState<ConversationPreview[]>([])
   const [loadingConversations, setLoadingConversations] = useState(false)
   const [isPinned, setIsPinned] = useState(post.pinned)
@@ -209,9 +230,10 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
   }
 
   const handleShare = () => {
-    navigator.clipboard.writeText(`${window.location.origin}/profile/${post.author._id}`)
-    addToast('Link copied to clipboard!', 'success')
+    setShowShareModal(true)
   }
+
+  const shareUrl = `${window.location.origin}/profile/${post.author._id}`
 
   const handleShareToChat = () => {
     setShowShareChatModal(true)
@@ -272,7 +294,7 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
             <span className={`text-text font-medium cursor-pointer hover:text-primary transition-colors ${isReply ? 'text-xs' : 'text-sm'}`} onClick={() => navigate(`/profile/${comment.author._id}`)}>{comment.author.username}</span>
             <span className="text-text-muted text-xs">{formatRelativeTime(comment.createdAt)}</span>
           </div>
-          <p className={`text-text-secondary mt-1 ${isReply ? 'text-xs' : 'text-sm'}`}>{comment.content}</p>
+          <p className={`text-text-secondary mt-1 ${isReply ? 'text-xs' : 'text-sm'}`}>{renderMentions(comment.content)}</p>
           <div className="flex items-center space-x-3 mt-1.5">
             <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={() => handleLikeComment(comment._id)}
               className={`flex items-center space-x-1 transition-all duration-200 ${isCommentLiked ? 'text-primary glow-sm' : 'text-text-muted hover:text-primary'}`}>
@@ -386,6 +408,16 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
           <span>Pinned</span>
         </div>
       )}
+      {post.status === 'draft' && (
+        <div className="flex items-center space-x-1.5 mb-3">
+          <span className="px-2 py-0.5 bg-amber-500/15 text-amber-400 rounded-md text-xs font-medium">Draft</span>
+        </div>
+      )}
+      {post.status === 'scheduled' && post.scheduledAt && (
+        <div className="flex items-center space-x-1.5 mb-3">
+          <span className="px-2 py-0.5 bg-blue-500/15 text-blue-400 rounded-md text-xs font-medium">Scheduled: {new Date(post.scheduledAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3 cursor-pointer group/author" onClick={() => navigate(`/profile/${post.author._id}`)}>
@@ -445,7 +477,7 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
       ) : (
         <>
           {post.title && <h3 className="text-lg font-bold text-text mb-2 gradient-text">{post.title}</h3>}
-          <p className="text-text-secondary leading-relaxed mb-2 text-[15px]">{post.content}</p>
+          <p className="text-text-secondary leading-relaxed mb-2 text-[15px]">{renderMentions(post.content)}</p>
           {post.hashtags && post.hashtags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-3">
               {post.hashtags.map(tag => (
@@ -454,6 +486,12 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
                   #{tag}
                 </motion.span>
               ))}
+            </div>
+          )}
+          {post.location && (
+            <div className="flex items-center space-x-1.5 mb-3 text-text-muted text-xs">
+              <MapPin size={14} className="text-primary" />
+              <span>{post.location.name}</span>
             </div>
           )}
         </>
@@ -553,6 +591,12 @@ const Post: React.FC<PostProps> = ({ post, onUpdate, onDelete }) => {
           </div>
         </motion.div>
       )}
+
+      <AnimatePresence>
+        {showShareModal && (
+          <ShareModal url={shareUrl} text={post.content} onClose={() => setShowShareModal(false)} />
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }

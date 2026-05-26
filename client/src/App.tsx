@@ -21,6 +21,8 @@ import {
   BarChart3,
   UserPlus,
   LogOut,
+  Images,
+  FileEdit,
 } from 'lucide-react'
 import { useAuth } from './contexts/AuthContext'
 import { useSocket } from './contexts/SocketContext'
@@ -38,6 +40,8 @@ const AdminPage = lazy(() => import('./pages/AdminPage'))
 const ReelsPage = lazy(() => import('./pages/ReelsPage'))
 const LivePage = lazy(() => import('./pages/LivePage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
+const AlbumsPage = lazy(() => import('./pages/AlbumsPage'))
+const DraftsPage = lazy(() => import('./pages/DraftsPage'))
 import Avatar from './components/Avatar'
 import NotificationsPanel from './components/NotificationsPanel'
 import FriendRequestsPanel from './components/FriendRequestsPanel'
@@ -45,6 +49,8 @@ import OnboardingModal from './components/OnboardingModal'
 import { Dock } from '@/components/ui/dock'
 import { ShimmerButton } from '@/components/ui/shimmer-button'
 import { Aurora } from '@/components/ui/aurora'
+import VideoCall, { IncomingCallModal } from './components/VideoCall'
+import AiChatBot from './components/AiChatBot'
 import { useMobileKeyboard } from './hooks/useFocusTrap'
 import { initPushNotifications, showNewPostNotification, showNewMessageNotification, showLikeNotification, showFollowNotification, showCommentNotification } from './utils/pushNotifications'
 
@@ -176,6 +182,8 @@ function App() {
   const [requestCount, setRequestCount] = useState(0)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [showScrollTop, setShowScrollTop] = useState(false)
+  const [incomingCall, setIncomingCall] = useState<{ callId: string; caller: { _id: string; username: string; avatar?: string }; callType: 'video' | 'audio'; offer: RTCSessionDescriptionInit } | null>(null)
+  const [activeVideoCall, setActiveVideoCall] = useState<{ targetUserId: string; targetUsername: string; targetAvatar?: string; callType: 'video' | 'audio'; incomingCall?: { callId: string; caller: { _id: string; username: string; avatar?: string }; callType: 'video' | 'audio'; offer: RTCSessionDescriptionInit } } | null>(null)
 
   const fetchCounts = useCallback(async () => {
     if (!isAuthenticated) return
@@ -198,8 +206,17 @@ function App() {
     socket.on('notification', () => {
       fetchCounts()
     })
+    socket.on('call:offer', (data: { callId: string; caller: { _id: string; username: string; avatar?: string }; callType: 'video' | 'audio'; offer: RTCSessionDescriptionInit }) => {
+      setIncomingCall(data)
+      addToast(`Incoming ${data.callType} call from ${data.caller.username}`, 'info')
+    })
+    socket.on('call:start', (data: { from: { _id: string; username: string } }) => {
+      addToast(`Call from ${data.from.username}`, 'info')
+    })
     return () => {
       socket.off('notification')
+      socket.off('call:offer')
+      socket.off('call:start')
     }
   }, [socket, fetchCounts])
 
@@ -234,6 +251,8 @@ function App() {
     { icon: Play, label: 'Reels', path: '/reels' },
     { icon: Radio, label: 'Live', path: '/live' },
     { icon: BarChart3, label: 'Analytics', path: '/analytics' },
+    { icon: Images, label: 'Albums', path: '/albums' },
+    { icon: FileEdit, label: 'Drafts', path: '/drafts' },
     { icon: MessageCircle, label: 'Messages', path: '/messages' },
     { icon: Bookmark, label: 'Bookmarks', path: '/bookmarks' },
     { icon: User, label: 'Profile', path: '/profile' },
@@ -245,6 +264,8 @@ function App() {
     { icon: <Home size={20} />, label: 'Home', onClick: () => navigate('/') },
     { icon: <Compass size={20} />, label: 'Explore', onClick: () => navigate('/explore') },
     { icon: <motion.div animate={{ rotate: 90 }}><Play size={20} /></motion.div>, label: 'Reels', onClick: () => navigate('/reels') },
+    { icon: <Images size={20} />, label: 'Albums', onClick: () => navigate('/albums') },
+    { icon: <FileEdit size={20} />, label: 'Drafts', onClick: () => navigate('/drafts') },
     { icon: <Radio size={20} />, label: 'Live', onClick: () => navigate('/live') },
     { icon: <MessageCircle size={20} />, label: 'Messages', onClick: () => navigate('/messages') },
     { icon: <Bell size={20} />, label: 'Notifications', onClick: () => setShowNotifications(!showNotifications) },
@@ -492,6 +513,8 @@ function App() {
                   <Route path="/live" element={<LivePage />} />
                   <Route path="/live/:streamId" element={<LivePage />} />
                   <Route path="/analytics" element={<AnalyticsPage />} />
+                  <Route path="/albums" element={<AlbumsPage />} />
+                  <Route path="/drafts" element={<DraftsPage />} />
                   <Route path="/explore" element={<ExplorePage />} />
                   <Route path="/messages" element={<MessagesPage />} />
                   <Route path="/bookmarks" element={<BookmarksPage />} />
@@ -540,6 +563,43 @@ function App() {
         isOpen={showOnboarding}
         onClose={completeOnboarding}
       />
+
+      <AnimatePresence>
+        {incomingCall && !activeVideoCall && (
+          <IncomingCallModal
+            callData={incomingCall}
+            onAccept={() => {
+              setActiveVideoCall({
+                targetUserId: incomingCall.caller._id,
+                targetUsername: incomingCall.caller.username,
+                targetAvatar: incomingCall.caller.avatar,
+                callType: incomingCall.callType,
+                incomingCall
+              })
+              setIncomingCall(null)
+            }}
+            onReject={() => {
+              if (socket) socket.emit('call:reject', { to: incomingCall.caller._id, callId: incomingCall.callId })
+              setIncomingCall(null)
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {activeVideoCall && (
+          <VideoCall
+            targetUserId={activeVideoCall.targetUserId}
+            targetUsername={activeVideoCall.targetUsername}
+            targetAvatar={activeVideoCall.targetAvatar}
+            callType={activeVideoCall.callType}
+            incomingCall={activeVideoCall.incomingCall}
+            onEnd={() => setActiveVideoCall(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AiChatBot />
     </div>
   )
 }

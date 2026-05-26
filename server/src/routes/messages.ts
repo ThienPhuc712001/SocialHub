@@ -1,12 +1,12 @@
 import express, { Response } from 'express';
 import mongoose from 'mongoose';
-import { validationResult } from 'express-validator';
 import Message from '../models/Message';
 import User from '../models/User';
 import Block from '../models/Block';
 import Notification from '../models/Notification';
 import authMiddleware, { AuthRequest } from '../middleware/auth';
 import { messageValidation } from '../middleware/validation';
+import { audioUpload, fileUpload, chatImageUpload } from '../middleware/upload';
 
 const router = express.Router();
 
@@ -55,11 +55,11 @@ router.get('/conversations', authMiddleware, async (req: AuthRequest, res: Respo
     messages.forEach((msg: any) => {
       const other = msg.sender._id.toString() === req.user!.id ? msg.receiver : msg.sender;
       if (!users.has(other._id.toString())) {
-        users.set(other._id.toString(), { ...other.toObject(), lastMessage: msg.content, lastMessageTime: msg.createdAt });
+        users.set(other._id.toString(), { ...other.toObject(), lastMessage: msg.content || `[${msg.messageType}]`, lastMessageTime: msg.createdAt });
       } else {
         const existing = users.get(other._id.toString());
         if (msg.createdAt > existing.lastMessageTime) {
-          users.set(other._id.toString(), { ...other.toObject(), lastMessage: msg.content, lastMessageTime: msg.createdAt });
+          users.set(other._id.toString(), { ...other.toObject(), lastMessage: msg.content || `[${msg.messageType}]`, lastMessageTime: msg.createdAt });
         }
       }
     });
@@ -138,15 +138,20 @@ router.get('/:userId', authMiddleware, async (req: AuthRequest, res: Response) =
 });
 
 router.post('/:userId', authMiddleware, messageValidation, async (req: AuthRequest, res: Response) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
   try {
     const targetUserId = req.params.userId as string;
     if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
       return res.status(400).json({ message: 'Invalid user ID' });
     }
-    const { content } = req.body;
+    const { content, messageType, stickerId } = req.body;
+    const msgType = messageType || 'text';
+
+    if (msgType === 'text' && (!content || !content.trim())) {
+      return res.status(400).json({ message: 'Message content is required' });
+    }
+    if (msgType === 'sticker' && !stickerId) {
+      return res.status(400).json({ message: 'Sticker ID is required' });
+    }
 
     const targetUser = await User.findById(targetUserId);
     if (!targetUser) return res.status(404).json({ message: 'User not found' });
@@ -159,11 +164,15 @@ router.post('/:userId', authMiddleware, messageValidation, async (req: AuthReque
     });
     if (blockExists) return res.status(403).json({ message: 'Cannot message this user' });
 
-    const message = new Message({
+    const messageData: any = {
       sender: new mongoose.Types.ObjectId(req.user!.id),
       receiver: new mongoose.Types.ObjectId(targetUserId),
-      content,
-    });
+      messageType: msgType,
+    };
+    if (msgType === 'text') messageData.content = content;
+    if (msgType === 'sticker') { messageData.stickerId = stickerId; messageData.content = stickerId; }
+
+    const message = new Message(messageData);
     await message.save();
     await message.populate('sender', 'username avatar');
     await message.populate('receiver', 'username avatar');
@@ -172,7 +181,7 @@ router.post('/:userId', authMiddleware, messageValidation, async (req: AuthReque
       recipient: new mongoose.Types.ObjectId(targetUserId),
       sender: new mongoose.Types.ObjectId(req.user!.id),
       type: 'message',
-      content: content.substring(0, 50),
+      content: msgType === 'text' ? content.substring(0, 50) : `[${msgType}]`,
     });
 
     const io = req.app.get('io');
@@ -182,6 +191,138 @@ router.post('/:userId', authMiddleware, messageValidation, async (req: AuthReque
     res.status(201).json(message);
   } catch (error: any) {
     res.status(400).json({ message: 'Failed to send message' });
+  }
+});
+
+router.post('/:userId/voice', authMiddleware, audioUpload.single('audio'), async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = req.params.userId as string;
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) return res.status(400).json({ message: 'Invalid user ID' });
+    if (!req.file) return res.status(400).json({ message: 'Audio file is required' });
+
+    const blockExists = await Block.findOne({
+      $or: [
+        { blocker: new mongoose.Types.ObjectId(req.user!.id), blocked: new mongoose.Types.ObjectId(targetUserId) },
+        { blocker: new mongoose.Types.ObjectId(targetUserId), blocked: new mongoose.Types.ObjectId(req.user!.id) },
+      ],
+    });
+    if (blockExists) return res.status(403).json({ message: 'Cannot message this user' });
+
+    const audioUrl = `/uploads/${req.file.filename}`;
+    const message = new Message({
+      sender: new mongoose.Types.ObjectId(req.user!.id),
+      receiver: new mongoose.Types.ObjectId(targetUserId),
+      messageType: 'voice',
+      content: 'Voice message',
+      audioUrl,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+    await message.populate('receiver', 'username avatar');
+
+    await Notification.create({
+      recipient: new mongoose.Types.ObjectId(targetUserId),
+      sender: new mongoose.Types.ObjectId(req.user!.id),
+      type: 'message',
+      content: '[Voice message]',
+    });
+
+    const io = req.app.get('io');
+    io.to(targetUserId).emit('newMessage', message);
+    io.to(targetUserId).emit('notification', { type: 'message', senderId: req.user!.id });
+
+    res.status(201).json(message);
+  } catch (error: any) {
+    res.status(400).json({ message: 'Failed to send voice message' });
+  }
+});
+
+router.post('/:userId/file', authMiddleware, fileUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = req.params.userId as string;
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) return res.status(400).json({ message: 'Invalid user ID' });
+    if (!req.file) return res.status(400).json({ message: 'File is required' });
+
+    const blockExists = await Block.findOne({
+      $or: [
+        { blocker: new mongoose.Types.ObjectId(req.user!.id), blocked: new mongoose.Types.ObjectId(targetUserId) },
+        { blocker: new mongoose.Types.ObjectId(targetUserId), blocked: new mongoose.Types.ObjectId(req.user!.id) },
+      ],
+    });
+    if (blockExists) return res.status(403).json({ message: 'Cannot message this user' });
+
+    const fileUrl = `/uploads/${req.file.filename}`;
+    const message = new Message({
+      sender: new mongoose.Types.ObjectId(req.user!.id),
+      receiver: new mongoose.Types.ObjectId(targetUserId),
+      messageType: 'file',
+      content: req.file.originalname || 'File',
+      fileUrl,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      fileType: req.file.mimetype,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+    await message.populate('receiver', 'username avatar');
+
+    await Notification.create({
+      recipient: new mongoose.Types.ObjectId(targetUserId),
+      sender: new mongoose.Types.ObjectId(req.user!.id),
+      type: 'message',
+      content: `[File: ${req.file.originalname}]`,
+    });
+
+    const io = req.app.get('io');
+    io.to(targetUserId).emit('newMessage', message);
+    io.to(targetUserId).emit('notification', { type: 'message', senderId: req.user!.id });
+
+    res.status(201).json(message);
+  } catch (error: any) {
+    res.status(400).json({ message: 'Failed to send file' });
+  }
+});
+
+router.post('/:userId/image', authMiddleware, chatImageUpload.single('image'), async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = req.params.userId as string;
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) return res.status(400).json({ message: 'Invalid user ID' });
+    if (!req.file) return res.status(400).json({ message: 'Image is required' });
+
+    const blockExists = await Block.findOne({
+      $or: [
+        { blocker: new mongoose.Types.ObjectId(req.user!.id), blocked: new mongoose.Types.ObjectId(targetUserId) },
+        { blocker: new mongoose.Types.ObjectId(targetUserId), blocked: new mongoose.Types.ObjectId(req.user!.id) },
+      ],
+    });
+    if (blockExists) return res.status(403).json({ message: 'Cannot message this user' });
+
+    const imageUrl = `/uploads/${req.file.filename}`;
+    const message = new Message({
+      sender: new mongoose.Types.ObjectId(req.user!.id),
+      receiver: new mongoose.Types.ObjectId(targetUserId),
+      messageType: 'image',
+      content: 'Image',
+      imageUrl,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+    await message.populate('receiver', 'username avatar');
+
+    await Notification.create({
+      recipient: new mongoose.Types.ObjectId(targetUserId),
+      sender: new mongoose.Types.ObjectId(req.user!.id),
+      type: 'message',
+      content: '[Image]',
+    });
+
+    const io = req.app.get('io');
+    io.to(targetUserId).emit('newMessage', message);
+    io.to(targetUserId).emit('notification', { type: 'message', senderId: req.user!.id });
+
+    res.status(201).json(message);
+  } catch (error: any) {
+    res.status(400).json({ message: 'Failed to send image' });
   }
 });
 

@@ -1,8 +1,11 @@
 import express, { Response } from 'express';
 import mongoose from 'mongoose';
+import { validationResult } from 'express-validator';
 import Conversation from '../models/Conversation';
 import Message from '../models/Message';
 import authMiddleware, { AuthRequest } from '../middleware/auth';
+import { audioUpload, fileUpload, chatImageUpload } from '../middleware/upload';
+import { stickerMessageValidation, validate } from '../middleware/validation';
 
 const router = express.Router();
 
@@ -203,8 +206,9 @@ router.post('/:id/messages', authMiddleware, async (req: AuthRequest, res: Respo
     const id = req.params.id as string;
     if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid conversation ID' });
 
-    const { content } = req.body;
-    if (!content) return res.status(400).json({ message: 'Content is required' });
+    const { content, messageType } = req.body;
+    const mt = messageType || 'text';
+    if (mt === 'text' && !content) return res.status(400).json({ message: 'Content is required' });
 
     const conversation = await Conversation.findById(id);
     if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
@@ -218,13 +222,180 @@ router.post('/:id/messages', authMiddleware, async (req: AuthRequest, res: Respo
     const message = new Message({
       sender: senderId,
       receiver: otherParticipants[0] || senderId,
-      content,
+      content: mt === 'text' ? content : content || '',
+      messageType: mt,
       conversationId: conversation._id,
     });
     await message.save();
     await message.populate('sender', 'username avatar');
 
-    conversation.lastMessage = content;
+    conversation.lastMessage = mt === 'text' ? content : `[${mt}]`;
+    conversation.lastMessageTime = new Date();
+    await conversation.save();
+
+    const io = req.app.get('io');
+    for (const participantId of otherParticipants) {
+      io.to(participantId.toString()).emit('newMessage', message);
+    }
+
+    res.status(201).json(message);
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.post('/:id/messages/voice', authMiddleware, audioUpload.single('audio'), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid conversation ID' });
+    if (!req.file) return res.status(400).json({ message: 'Audio file is required' });
+
+    const conversation = await Conversation.findById(id);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+    if (!conversation.participants.some((p: any) => p.toString() === req.user!.id)) {
+      return res.status(403).json({ message: 'Not a participant in this conversation' });
+    }
+
+    const senderId = new mongoose.Types.ObjectId(req.user!.id);
+    const otherParticipants = conversation.participants.filter((p: any) => p.toString() !== req.user!.id);
+
+    const message = new Message({
+      sender: senderId,
+      receiver: otherParticipants[0] || senderId,
+      messageType: 'voice',
+      audioUrl: `/uploads/${req.file.filename}`,
+      conversationId: conversation._id,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+
+    conversation.lastMessage = '[voice]';
+    conversation.lastMessageTime = new Date();
+    await conversation.save();
+
+    const io = req.app.get('io');
+    for (const participantId of otherParticipants) {
+      io.to(participantId.toString()).emit('newMessage', message);
+    }
+
+    res.status(201).json(message);
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.post('/:id/messages/file', authMiddleware, fileUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid conversation ID' });
+    if (!req.file) return res.status(400).json({ message: 'File is required' });
+
+    const conversation = await Conversation.findById(id);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+    if (!conversation.participants.some((p: any) => p.toString() === req.user!.id)) {
+      return res.status(403).json({ message: 'Not a participant in this conversation' });
+    }
+
+    const senderId = new mongoose.Types.ObjectId(req.user!.id);
+    const otherParticipants = conversation.participants.filter((p: any) => p.toString() !== req.user!.id);
+
+    const message = new Message({
+      sender: senderId,
+      receiver: otherParticipants[0] || senderId,
+      messageType: 'file',
+      fileUrl: `/uploads/${req.file.filename}`,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      fileType: req.file.mimetype,
+      conversationId: conversation._id,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+
+    conversation.lastMessage = `[file: ${req.file.originalname}]`;
+    conversation.lastMessageTime = new Date();
+    await conversation.save();
+
+    const io = req.app.get('io');
+    for (const participantId of otherParticipants) {
+      io.to(participantId.toString()).emit('newMessage', message);
+    }
+
+    res.status(201).json(message);
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.post('/:id/messages/image', authMiddleware, chatImageUpload.single('image'), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid conversation ID' });
+    if (!req.file) return res.status(400).json({ message: 'Image is required' });
+
+    const conversation = await Conversation.findById(id);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+    if (!conversation.participants.some((p: any) => p.toString() === req.user!.id)) {
+      return res.status(403).json({ message: 'Not a participant in this conversation' });
+    }
+
+    const senderId = new mongoose.Types.ObjectId(req.user!.id);
+    const otherParticipants = conversation.participants.filter((p: any) => p.toString() !== req.user!.id);
+
+    const message = new Message({
+      sender: senderId,
+      receiver: otherParticipants[0] || senderId,
+      messageType: 'image',
+      imageUrl: `/uploads/${req.file.filename}`,
+      conversationId: conversation._id,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+
+    conversation.lastMessage = '[image]';
+    conversation.lastMessageTime = new Date();
+    await conversation.save();
+
+    const io = req.app.get('io');
+    for (const participantId of otherParticipants) {
+      io.to(participantId.toString()).emit('newMessage', message);
+    }
+
+    res.status(201).json(message);
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.post('/:id/messages/sticker', authMiddleware, stickerMessageValidation, validate, async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  try {
+    const id = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid conversation ID' });
+    const { stickerId } = req.body;
+
+    const conversation = await Conversation.findById(id);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+    if (!conversation.participants.some((p: any) => p.toString() === req.user!.id)) {
+      return res.status(403).json({ message: 'Not a participant in this conversation' });
+    }
+
+    const senderId = new mongoose.Types.ObjectId(req.user!.id);
+    const otherParticipants = conversation.participants.filter((p: any) => p.toString() !== req.user!.id);
+
+    const message = new Message({
+      sender: senderId,
+      receiver: otherParticipants[0] || senderId,
+      messageType: 'sticker',
+      stickerId,
+      conversationId: conversation._id,
+    });
+    await message.save();
+    await message.populate('sender', 'username avatar');
+
+    conversation.lastMessage = '[sticker]';
     conversation.lastMessageTime = new Date();
     await conversation.save();
 

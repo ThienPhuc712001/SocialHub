@@ -67,7 +67,20 @@ export const replyValidation = [
 ];
 
 export const messageValidation = [
-  body('content').trim().isLength({ min: 1, max: 2000 }).withMessage('Message must be 1-2000 characters'),
+  body('content').optional().trim().isLength({ max: 2000 }).withMessage('Message must be at most 2000 characters'),
+];
+
+export const stickerMessageValidation = [
+  body('stickerId').notEmpty().withMessage('Sticker ID is required'),
+  body('messageType').equals('sticker').withMessage('Message type must be sticker'),
+];
+
+export const voiceMessageValidation = [
+  body('messageType').equals('voice').withMessage('Message type must be voice'),
+];
+
+export const fileMessageValidation = [
+  body('messageType').equals('file').withMessage('Message type must be file'),
 ];
 
 export const updateProfileValidation = [

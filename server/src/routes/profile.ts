@@ -305,6 +305,31 @@ router.post('/unfollow/:id', authMiddleware, followValidation, async (req: AuthR
   }
 });
 
+router.get('/search-mention', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const q = (req.query.q as string) || '';
+    if (!q.trim()) return res.json([]);
+    const users = await User.find({ username: { $regex: escapeRegex(q), $options: 'i' } })
+      .select('_id username')
+      .limit(10);
+    res.json(users);
+  } catch {
+    res.status(500).json({ message: 'Search failed' });
+  }
+});
+
+router.get('/search-mention', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const queryStr = (req.query.q as string) || '';
+    if (!queryStr.trim()) return res.json([]);
+    const users = await User.find({ username: { $regex: escapeRegex(queryStr), $options: 'i' } })
+      .select('_id username avatar').limit(10);
+    res.json(users);
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 router.get('/search', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const queryStr = (req.query.q as string) || '';

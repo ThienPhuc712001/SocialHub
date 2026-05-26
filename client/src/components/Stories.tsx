@@ -1,15 +1,35 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence, PanInfo } from 'framer-motion'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useSocket } from '../contexts/SocketContext'
 import { useToast } from '../contexts/ToastContext'
 import { storyService, highlightService, Story, StoryHighlight, User } from '../services/api'
 import Avatar from './Avatar'
-import { Plus, X, ImagePlus, ChevronLeft, ChevronRight, Eye, BookmarkPlus, Check } from 'lucide-react'
+import { Plus, X, ImagePlus, ChevronLeft, ChevronRight, Eye, BookmarkPlus, Check, Send } from 'lucide-react'
 import { formatRelativeTime } from '../utils/format'
 import { compressMediaFile, shouldCompress } from '../utils/compression'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import HighlightViewer from './HighlightViewer'
+
+const renderMentions = (content: string): React.ReactNode => {
+  const parts = content.split(/(@\w+)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('@')) {
+      const username = part.slice(1)
+      return (
+        <Link
+          key={i}
+          to={`/profile/${username}`}
+          className="text-primary hover:text-accent transition-colors font-medium"
+        >
+          {part}
+        </Link>
+      )
+    }
+    return part
+  })
+}
 
 interface StoryGroup {
   author: { _id: string; username: string; avatar?: string }
@@ -38,6 +58,9 @@ const Stories: React.FC = () => {
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([])
   const [ownStories, setOwnStories] = useState<Story[]>([])
   const [compressingImage, setCompressingImage] = useState(false)
+  const [replyText, setReplyText] = useState('')
+  const [showReplies, setShowReplies] = useState(false)
+  const [storyReplies, setStoryReplies] = useState<any[]>([])
   const storyViewerRef = useFocusTrap<HTMLDivElement>(!!(viewingGroup || viewingHighlight))
   const createStoryRef = useFocusTrap<HTMLDivElement>(showCreate)
   const createHighlightRef = useFocusTrap<HTMLDivElement>(showCreateHighlight)
@@ -132,6 +155,9 @@ const Stories: React.FC = () => {
     setHighlightIndex(0)
     setShowViewers(false)
     setViewersList([])
+    setReplyText('')
+    setShowReplies(false)
+    setStoryReplies([])
     const story = group.stories[index]
     storyService.view(story._id).then(res => {
       setViewerCount(res.data.viewerCount)
@@ -142,6 +168,7 @@ const Stories: React.FC = () => {
     setViewingGroup(null); setViewingIndex(0)
     setViewingHighlight(null); setHighlightIndex(0)
     setShowViewers(false); setViewersList([])
+    setReplyText(''); setShowReplies(false); setStoryReplies([])
   }
 
   const openHighlightViewer = (highlight: StoryHighlight, index: number) => {
@@ -204,7 +231,28 @@ const Stories: React.FC = () => {
       setViewerCount(res.data.viewerCount)
       setShowViewers(true)
     } catch {
-      // Ignore highlight creation errors
+    }
+  }
+
+  const handleReply = async () => {
+    if (!currentStory || !replyText.trim()) return
+    try {
+      await storyService.reply(currentStory._id, replyText.trim())
+      addToast('Reply sent!', 'success')
+      setReplyText('')
+    } catch {
+      addToast('Failed to send reply', 'error')
+    }
+  }
+
+  const handleShowReplies = async () => {
+    if (!currentStory) return
+    try {
+      const res = await storyService.getReplies(currentStory._id)
+      setStoryReplies(res.data || [])
+      setShowReplies(true)
+    } catch {
+      addToast('Failed to load replies', 'error')
     }
   }
 
@@ -473,12 +521,12 @@ const Stories: React.FC = () => {
               )}
               {currentStory.content && !currentStory.image && (
                 <div className="w-full h-full flex items-center justify-center p-8 bg-gradient-to-br from-primary/10 via-surface to-accent/10">
-                  <p className="text-white text-xl text-center font-medium leading-relaxed">{currentStory.content}</p>
+                  <p className="text-white text-xl text-center font-medium leading-relaxed">{renderMentions(currentStory.content)}</p>
                 </div>
               )}
               {currentStory.content && currentStory.image && (
                 <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/70 via-black/30 to-transparent">
-                  <p className="text-white text-sm">{currentStory.content}</p>
+                  <p className="text-white text-sm">{renderMentions(currentStory.content)}</p>
                 </div>
               )}
               {isOwnStory && (
@@ -491,6 +539,25 @@ const Stories: React.FC = () => {
                     className="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-white text-sm backdrop-blur-sm card-press">
                     Viewers
                   </motion.button>
+                  {currentStory.replies && currentStory.replies.length > 0 && (
+                    <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={handleShowReplies}
+                      className="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-white text-sm backdrop-blur-sm card-press">
+                      View Replies ({currentStory.replies.length})
+                    </motion.button>
+                  )}
+                </div>
+              )}
+              {!isOwnStory && viewingGroup && (
+                <div className="absolute bottom-4 left-4 right-4 z-20">
+                  <div className="flex items-center space-x-2">
+                    <input type="text" placeholder="Reply to story..." value={replyText} onChange={e => setReplyText(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleReply()}
+                      className="flex-1 px-3 py-2 bg-white/10 backdrop-blur-sm rounded-xl text-white placeholder-white/50 text-sm border border-white/10" />
+                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={handleReply}
+                      className="p-2 bg-primary text-white rounded-xl card-press">
+                      <Send size={16} />
+                    </motion.button>
+                  </div>
                 </div>
               )}
               <AnimatePresence>
@@ -513,6 +580,25 @@ const Stories: React.FC = () => {
                   </motion.div>
                 )}
               </AnimatePresence>
+              {showReplies && storyReplies.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="absolute bottom-16 left-4 z-30 w-64 glass-heavy bg-surface/90 rounded-xl border border-border/20 shadow-lg p-3 max-h-48 overflow-y-auto"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-white font-medium text-sm">Replies</span>
+                    <button onClick={() => setShowReplies(false)} className="p-1 text-white/60 hover:text-white card-press"><X size={14} /></button>
+                  </div>
+                  {storyReplies.map((reply: any) => (
+                    <div key={reply._id} className="flex items-center space-x-2 py-1.5">
+                      <Avatar src={reply.sender.avatar} name={reply.sender.username} size={24} />
+                      <span className="text-white text-sm font-medium">{reply.sender.username}</span>
+                      <span className="text-white/60 text-xs">{reply.content}</span>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
               {(viewingGroup && viewingIndex > 0) || (viewingHighlight && highlightIndex > 0) ? (
                 <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} onClick={prevStory} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-black/30 hover:bg-black/50 rounded-full text-white z-10 card-press"><ChevronLeft size={24} /></motion.button>
               ) : null}

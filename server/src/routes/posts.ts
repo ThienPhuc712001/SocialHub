@@ -14,7 +14,7 @@ import { createPostValidation, updatePostValidation, commentValidation } from '.
 
 const router = express.Router();
 
-import { extractHashtags } from '../utils/hashtags';
+import { extractHashtags, extractMentions } from '../utils/hashtags';
 import { escapeRegex } from '../utils/escapeRegex';
 
 router.get('/suggestions', authMiddleware, async (req: AuthRequest, res: Response) => {
@@ -39,6 +39,45 @@ router.get('/suggestions', authMiddleware, async (req: AuthRequest, res: Respons
       .limit(5);
 
     res.json({ users: suggestedUsers, posts: suggestedPosts });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.get('/drafts', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user!.id);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const skip = (page - 1) * limit;
+    const total = await Post.countDocuments({ author: userId, status: 'draft' });
+    const draftPosts = await Post.find({ author: userId, status: 'draft' })
+      .populate('author', 'username avatar').sort({ createdAt: -1 }).skip(skip).limit(limit);
+    res.json({ posts: draftPosts, total, page, pages: Math.ceil(total / limit) });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.get('/nearby', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const latitude = parseFloat(req.query.latitude as string);
+    const longitude = parseFloat(req.query.longitude as string);
+    const radius = parseInt(req.query.radius as string) || 5000;
+    if (!latitude || !longitude) return res.status(400).json({ message: 'Latitude and longitude are required' });
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const skip = (page - 1) * limit;
+    const blocks = await Block.find({ blocker: new mongoose.Types.ObjectId(req.user!.id) });
+    const blockedIds = blocks.map(b => b.blocked);
+    const filter: any = {
+      status: 'published', visibility: 'public', author: { $nin: blockedIds },
+      location: { $nearSphere: { $geometry: { type: 'Point', coordinates: [longitude, latitude] }, $maxDistance: radius } },
+    };
+    const total = await Post.countDocuments(filter);
+    const postList = await Post.find(filter).populate('author', 'username avatar')
+      .sort({ createdAt: -1 }).skip(skip).limit(limit);
+    res.json({ posts: postList, total, page, pages: Math.ceil(total / limit) });
   } catch (error: any) {
     res.status(500).json({ message: 'Internal server error' });
   }
@@ -269,8 +308,13 @@ router.get('/user/:userId', authMiddleware, async (req: AuthRequest, res: Respon
     });
     if (blockExists) return res.status(403).json({ message: 'Cannot view this user\'s posts' });
 
-    const total = await Post.countDocuments({ author: userId });
-    const userPosts = await Post.find({ author: userId })
+    const includeDrafts = req.query.includeDrafts === 'true' && userIdStr === req.user!.id;
+    const filter: any = includeDrafts
+      ? { author: userId, status: { $in: ['published', 'draft'] } }
+      : { author: userId, status: 'published' };
+
+    const total = await Post.countDocuments(filter);
+    const userPosts = await Post.find(filter)
       .populate('author', 'username avatar')
       .sort({ pinned: -1, createdAt: -1 })
       .skip(skip)
@@ -297,14 +341,15 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     const blockedIds = blocks.map(b => b.blocked);
     const filteredAuthors = authorFilter.filter(id => !blockedIds.some(bId => bId.equals(new mongoose.Types.ObjectId(id as string))));
 
-    const total = await Post.countDocuments({ author: { $in: filteredAuthors } });
+    const filter: any = { author: { $in: filteredAuthors }, status: 'published' };
+    const total = await Post.countDocuments(filter);
 
     let sortObj: { pinned: number; createdAt: number } | { pinned: number; 'likes.length': number; createdAt: number } = { pinned: -1, createdAt: -1 };
     if (sort === 'popular') {
       sortObj = { pinned: -1, 'likes.length': -1, createdAt: -1 };
     }
 
-    const postList = await Post.find({ author: { $in: filteredAuthors } })
+    const postList = await Post.find(filter)
       .populate('author', 'username avatar')
       .sort(sortObj)
       .skip(skip)
@@ -321,16 +366,49 @@ router.post('/', authMiddleware, mediaUpload.fields([{ name: 'image', maxCount: 
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   try {
-    const { title, content } = req.body;
+    const { title, content, status, scheduledAt, locationName, latitude, longitude } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const image = files?.image?.[0] ? `/uploads/${files.image[0].filename}` : undefined;
     const video = files?.video?.[0] ? `/uploads/${files.video[0].filename}` : undefined;
     const hashtags = extractHashtags(content);
-    const post = new Post({ title, content, image, video, hashtags, author: new mongoose.Types.ObjectId(req.user!.id) });
+    const mentionUsernames = extractMentions(content);
+    const mentionedUsers = mentionUsernames.length > 0 ? await User.find({ username: { $in: mentionUsernames } }).select('_id') : [];
+    const mentions = mentionedUsers.map(u => u._id);
+
+    const location = locationName && latitude && longitude ? {
+      name: locationName,
+      type: 'Point',
+      coordinates: [parseFloat(latitude), parseFloat(longitude)],
+    } : undefined;
+
+    const post = new Post({
+      title, content, image, video, hashtags, author: new mongoose.Types.ObjectId(req.user!.id),
+      mentions, location,
+      status: status || 'published',
+      scheduledAt: scheduledAt ? new Date(scheduledAt) : undefined,
+    });
     await post.save();
     await post.populate('author', 'username avatar');
-    const io = req.app.get('io');
-    io.emit('newPost', post);
+
+    if (status !== 'draft') {
+      const io = req.app.get('io');
+      io.emit('newPost', post);
+    }
+
+    for (const mentioned of mentionedUsers) {
+      if (mentioned._id.toString() !== req.user!.id) {
+        await Notification.create({
+          recipient: mentioned._id,
+          sender: new mongoose.Types.ObjectId(req.user!.id),
+          type: 'mention',
+          post: post._id,
+          content: content.substring(0, 50),
+        });
+        const io = req.app.get('io');
+        io.to(mentioned._id.toString()).emit('notification', { type: 'mention', postId: post._id, senderId: req.user!.id });
+      }
+    }
+
     res.status(201).json(post);
   } catch (error: any) {
     res.status(400).json({ message: 'Failed to create post' });
@@ -398,8 +476,37 @@ router.put('/:id', authMiddleware, updatePostValidation, async (req: AuthRequest
     post.content = req.body.content || post.content;
     post.hashtags = extractHashtags(post.content);
     post.editedAt = new Date();
+
+    if (req.body.locationName && req.body.latitude && req.body.longitude) {
+      post.location = {
+        name: req.body.locationName,
+        type: 'Point',
+        coordinates: [parseFloat(req.body.latitude), parseFloat(req.body.longitude)],
+      };
+    }
+
+    const mentionUsernames = extractMentions(post.content);
+    const mentionedUsers = mentionUsernames.length > 0 ? await User.find({ username: { $in: mentionUsernames } }).select('_id') : [];
+    post.mentions = mentionedUsers.map(u => u._id);
+
     await post.save();
     await post.populate('author', 'username avatar');
+
+    for (const mentioned of mentionedUsers) {
+      if (mentioned._id.toString() !== req.user!.id) {
+        await Notification.deleteOne({ recipient: mentioned._id, sender: new mongoose.Types.ObjectId(req.user!.id), type: 'mention', post: post._id });
+        await Notification.create({
+          recipient: mentioned._id,
+          sender: new mongoose.Types.ObjectId(req.user!.id),
+          type: 'mention',
+          post: post._id,
+          content: post.content.substring(0, 50),
+        });
+        const io = req.app.get('io');
+        io.to(mentioned._id.toString()).emit('notification', { type: 'mention', postId: post._id, senderId: req.user!.id });
+      }
+    }
+
     res.json(post);
   } catch (error: any) {
     res.status(400).json({ message: 'Failed to update post' });
@@ -482,6 +589,22 @@ router.post('/:id/comments', authMiddleware, commentValidation, async (req: Auth
       });
       const io = req.app.get('io');
       io.to(recipientId.toString()).emit('notification', { type: 'comment', postId, senderId: req.user!.id });
+    }
+
+    const mentionUsernames = extractMentions(content);
+    const mentionedUsers = mentionUsernames.length > 0 ? await User.find({ username: { $in: mentionUsernames } }).select('_id') : [];
+    for (const mentioned of mentionedUsers) {
+      if (mentioned._id.toString() !== req.user!.id && mentioned._id.toString() !== recipientId?.toString()) {
+        await Notification.create({
+          recipient: mentioned._id,
+          sender: new mongoose.Types.ObjectId(req.user!.id),
+          type: 'mention',
+          post: new mongoose.Types.ObjectId(postId),
+          content: content.substring(0, 50),
+        });
+        const io = req.app.get('io');
+        io.to(mentioned._id.toString()).emit('notification', { type: 'mention', postId, senderId: req.user!.id });
+      }
     }
 
     res.status(201).json(comment);
@@ -647,64 +770,6 @@ router.post('/:id/view', authMiddleware, async (req: AuthRequest, res: Response)
   }
 });
 
-router.post('/:id/pin', authMiddleware, async (req: AuthRequest, res: Response) => {
-  try {
-    const postId = req.params.id as string;
-    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
-    const post = await Post.findById(postId);
-    if (!post || post.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Post not found' });
-    post.pinned = true;
-    await post.save();
-    res.json({ message: 'Post pinned' });
-  } catch (error: any) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-router.delete('/:id/pin', authMiddleware, async (req: AuthRequest, res: Response) => {
-  try {
-    const postId = req.params.id as string;
-    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
-    const post = await Post.findById(postId);
-    if (!post || post.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Post not found' });
-    post.pinned = false;
-    await post.save();
-    res.json({ message: 'Post unpinned' });
-  } catch (error: any) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-router.post('/:id/share-to-chat', authMiddleware, async (req: AuthRequest, res: Response) => {
-  try {
-    const postId = req.params.id as string;
-    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
-
-    const { targetUserId } = req.body;
-    if (!targetUserId || !mongoose.Types.ObjectId.isValid(targetUserId)) {
-      return res.status(400).json({ message: 'Invalid target user ID' });
-    }
-
-    const post = await Post.findById(postId).populate('author', 'username');
-    if (!post) return res.status(404).json({ message: 'Post not found' });
-
-    const message = new Message({
-      sender: new mongoose.Types.ObjectId(req.user!.id),
-      receiver: new mongoose.Types.ObjectId(targetUserId),
-      content: `Shared a post: ${post.content?.substring(0, 100) || ''}`,
-    });
-    await message.save();
-    await message.populate('sender', 'username avatar');
-
-    const io = req.app.get('io');
-    io.to(targetUserId).emit('newMessage', message);
-
-    res.status(201).json({ message: 'Post shared to chat' });
-  } catch (error: any) {
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
 router.post('/:id/poll/vote', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const postId = req.params.id as string;
@@ -729,6 +794,42 @@ router.post('/:id/poll/vote', authMiddleware, async (req: AuthRequest, res: Resp
     post.poll.options[optionIndex].votes.push(userId);
     await post.save();
     res.json({ poll: post.poll });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.put('/:id/publish', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const postId = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
+    const post = await Post.findById(postId);
+    if (!post || post.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Post not found' });
+    if (post.status !== 'draft') return res.status(400).json({ message: 'Only draft posts can be published' });
+    post.status = 'published';
+    await post.save();
+    await post.populate('author', 'username avatar');
+    const io = req.app.get('io');
+    io.emit('newPost', post);
+    res.json(post);
+  } catch (error: any) {
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+router.put('/:id/schedule', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const postId = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(postId)) return res.status(400).json({ message: 'Invalid post ID' });
+    const { scheduledAt } = req.body;
+    if (!scheduledAt) return res.status(400).json({ message: 'scheduledAt is required' });
+    const post = await Post.findById(postId);
+    if (!post || post.author.toString() !== req.user!.id) return res.status(404).json({ message: 'Post not found' });
+    post.status = 'scheduled';
+    post.scheduledAt = new Date(scheduledAt);
+    await post.save();
+    await post.populate('author', 'username avatar');
+    res.json(post);
   } catch (error: any) {
     res.status(500).json({ message: 'Internal server error' });
   }
